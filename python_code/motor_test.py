@@ -1,7 +1,7 @@
 import serial
 import time
 
-PORT = "/dev/ttyUSB0"   # 按实际修改
+PORT = "/dev/ttyUSB1"   # 按实际修改
 BAUD = 115200
 MOTOR_ID = 0x01
 
@@ -155,7 +155,7 @@ if __name__ == "__main__":
     motor_run(ser)
 
     # 你可以改这里的几个目标角度测试
-    targets = [0.0, 3600.0, 3690.0]
+    targets = [0.0, 36000.0, 0.0]
 
     for t in targets:
         print(f"\n===== 发送多圈位置 {t}° =====")

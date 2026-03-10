@@ -17,7 +17,7 @@ CMD_DLP_OFF       = "A6 02 02 00"    # 关闭DLP
 CMD_FAN_ON        = "A6 02 04 03"    # 开启风扇
 CMD_LED_ON        = "A6 02 03 01"    # 开启LED
 CMD_LED_OFF       = "A6 02 03 00"    # 关闭LED
-CMD_BRIGHTNESS_80 = "A6 02 10 50"    # 亮度80 (0x50)
+CMD_BRIGHTNESS_80 = "A6 02 10 78"    # 亮度80 (0x50)
 CMD_SAVE_SETTINGS = "A6 01 7F"       # 保存设置
 
 def send_hex_command(ser, hex_str, description):
@@ -104,6 +104,7 @@ def main():
     except KeyboardInterrupt:
         print("\n用户强制停止")
     finally:
+        send_hex_command(ser, CMD_LED_OFF, "步骤6: 关闭 UV LED")
         ser.close()
         print("串口已关闭")
 

@@ -1,0 +1,14 @@
+/home/mfs/StepperPigpio/bin/Release/net8.0/linux-arm/StepperPigpio
+/home/mfs/StepperPigpio/bin/Release/net8.0/linux-arm/StepperPigpio.deps.json
+/home/mfs/StepperPigpio/bin/Release/net8.0/linux-arm/StepperPigpio.runtimeconfig.json
+/home/mfs/StepperPigpio/bin/Release/net8.0/linux-arm/StepperPigpio.dll
+/home/mfs/StepperPigpio/bin/Release/net8.0/linux-arm/StepperPigpio.pdb
+/home/mfs/StepperPigpio/obj/Release/net8.0/linux-arm/StepperPigpio.GeneratedMSBuildEditorConfig.editorconfig
+/home/mfs/StepperPigpio/obj/Release/net8.0/linux-arm/StepperPigpio.AssemblyInfoInputs.cache
+/home/mfs/StepperPigpio/obj/Release/net8.0/linux-arm/StepperPigpio.AssemblyInfo.cs
+/home/mfs/StepperPigpio/obj/Release/net8.0/linux-arm/StepperPigpio.csproj.CoreCompileInputs.cache
+/home/mfs/StepperPigpio/obj/Release/net8.0/linux-arm/StepperPigpio.dll
+/home/mfs/StepperPigpio/obj/Release/net8.0/linux-arm/refint/StepperPigpio.dll
+/home/mfs/StepperPigpio/obj/Release/net8.0/linux-arm/StepperPigpio.pdb
+/home/mfs/StepperPigpio/obj/Release/net8.0/linux-arm/StepperPigpio.genruntimeconfig.cache
+/home/mfs/StepperPigpio/obj/Release/net8.0/linux-arm/ref/StepperPigpio.dll

@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "dgSpecHash": "SHSQy3pav20=",
+  "success": false,
+  "projectFilePath": "/home/mfs/StepperPigpio/StepperPigpio.csproj",
+  "expectedPackageFiles": [],
+  "logs": [
+    {
+      "code": "NU1301",
+      "level": "Error",
+      "message": "Unable to load the service index for source https://api.nuget.org/v3/index.json.",
+      "libraryId": "Microsoft.NETCore.App.Runtime.linux-arm"
+    },
+    {
+      "code": "NU1301",
+      "level": "Error",
+      "message": "Unable to load the service index for source https://api.nuget.org/v3/index.json.",
+      "libraryId": "Microsoft.AspNetCore.App.Runtime.linux-arm"
+    }
+  ]
+}

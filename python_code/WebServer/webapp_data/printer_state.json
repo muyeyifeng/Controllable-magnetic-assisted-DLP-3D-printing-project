@@ -1,0 +1,528 @@
+{
+  "machine_state": "idle",
+  "status_text": "打印完成",
+  "updated_at": "2026-03-25T20:55:31",
+  "devices": {
+    "motor": {
+      "connected": true,
+      "message": "已连接",
+      "position_um": 0.0
+    },
+    "uv": {
+      "connected": true,
+      "message": "模拟连接: [Errno 2] could not open port /dev/ttyUSB0: [Errno 2] No such file or directory: '/dev/ttyUSB0'",
+      "power": 80,
+      "lamp_on": false
+    },
+    "magnet": {
+      "connected": true,
+      "message": "已连接",
+      "enabled": false,
+      "voltage": 0.0
+    }
+  },
+  "images": {
+    "upload_id": "20260325_200347_638585",
+    "count": 3,
+    "directory": "C:\\Users\\mfs\\Documents\\GitHub\\Controllable-magnetic-assisted-DLP-3D-printing-project\\python_code\\webapp_data\\uploads\\20260325_200347_638585",
+    "files": [
+      {
+        "name": "100pixel.png",
+        "relative_path": "100pixel.png",
+        "url": "/uploads/20260325_200347_638585/100pixel.png",
+        "mime": "image/png"
+      },
+      {
+        "name": "pattern_0.png",
+        "relative_path": "pattern_0.png",
+        "url": "/uploads/20260325_200347_638585/pattern_0.png",
+        "mime": "image/png"
+      },
+      {
+        "name": "pattern_1.png",
+        "relative_path": "pattern_1.png",
+        "url": "/uploads/20260325_200347_638585/pattern_1.png",
+        "mime": "image/png"
+      }
+    ],
+    "preview_index": 1
+  },
+  "job": {
+    "active": false,
+    "paused": false,
+    "phase": "completed",
+    "current_layer": 3,
+    "completed_layers": 3,
+    "total_layers": 3,
+    "progress_percent": 100.0,
+    "current_image_url": "/uploads/20260325_200347_638585/pattern_1.png",
+    "current_image_name": "pattern_1.png",
+    "started_at": "2026-03-25T20:49:16",
+    "finished_at": "2026-03-25T20:49:20",
+    "error": null
+  },
+  "settings": {
+    "fast_down_distance_um": 10,
+    "fast_down_speed_um_s": 20,
+    "fast_up_distance_um": 10,
+    "fast_up_speed_um_s": 20,
+    "slow_down_speed_um_s": 5,
+    "slow_up_speed_um_s": 5,
+    "exposure_time_s": 0.05,
+    "exposure_power": 80,
+    "inter_layer_delay_s": 0.01,
+    "magnet_enabled_for_job": false,
+    "magnet_voltage": 2,
+    "magnet_keep_on_between_layers": true,
+    "motor_steps_per_rev": 3200,
+    "motor_lead_mm": 4.0,
+    "motor_pul_pin": 13,
+    "motor_dir_pin": 5,
+    "motor_ena_pin": 8,
+    "motor_top_limit_pin": 20,
+    "motor_ena_active_low": true,
+    "motor_pulse_width_us": 20,
+    "motor_chunk_steps": 200,
+    "motor_state_file": "C:\\Users\\mfs\\Documents\\GitHub\\Controllable-magnetic-assisted-DLP-3D-printing-project\\python_code\\webapp_data\\motor_state.json",
+    "uv_port": "/dev/ttyUSB0",
+    "uv_baudrate": 115200,
+    "uv_timeout_s": 1.0,
+    "magnet_i2c_bus": 1,
+    "magnet_i2c_addr": "0x60",
+    "auto_pull_up_after_finish": true,
+    "auto_pull_up_distance_um": 5000,
+    "preview_layer_index": 1
+  },
+  "logs": [
+    {
+      "time": "2026-03-25T20:02:09",
+      "level": "info",
+      "message": "系统已初始化，等待设备连接"
+    },
+    {
+      "time": "2026-03-25T20:03:03",
+      "level": "info",
+      "message": "切片包已上传，共 3 张图像"
+    },
+    {
+      "time": "2026-03-25T20:03:03",
+      "level": "info",
+      "message": "自动打印已启动，共 3 层"
+    },
+    {
+      "time": "2026-03-25T20:03:03",
+      "level": "info",
+      "message": "第 1/3 层: 切换到 100pixel.png"
+    },
+    {
+      "time": "2026-03-25T20:03:03",
+      "level": "info",
+      "message": "已切换到图层图像: 100pixel.png"
+    },
+    {
+      "time": "2026-03-25T20:03:04",
+      "level": "warning",
+      "message": "电机真实移动失败，改用模拟位移: Traceback (most recent call last):\n  File \"C:\\Users\\mfs\\Documents\\GitHub\\Controllable-magnetic-assisted-DLP-3D-printing-project\\python_code\\motor_api.py\", line 2, in <module>\n    import pigpio\nModuleNotFoundError: No module named 'pigpio'"
+    },
+    {
+      "time": "2026-03-25T20:03:04",
+      "level": "info",
+      "message": "第 1 层: 电机上移 10.0um"
+    },
+    {
+      "time": "2026-03-25T20:03:04",
+      "level": "warning",
+      "message": "电机真实移动失败，改用模拟位移: Traceback (most recent call last):\n  File \"C:\\Users\\mfs\\Documents\\GitHub\\Controllable-magnetic-assisted-DLP-3D-printing-project\\python_code\\motor_api.py\", line 2, in <module>\n    import pigpio\nModuleNotFoundError: No module named 'pigpio'"
+    },
+    {
+      "time": "2026-03-25T20:03:04",
+      "level": "info",
+      "message": "第 1 层: 电机下移 10.0um"
+    },
+    {
+      "time": "2026-03-25T20:03:04",
+      "level": "error",
+      "message": "[WinError 5] 拒绝访问。: 'C:\\\\Users\\\\mfs\\\\Documents\\\\GitHub\\\\Controllable-magnetic-assisted-DLP-3D-printing-project\\\\python_code\\\\webapp_data\\\\printer_state.json.tmp' -> 'C:\\\\Users\\\\mfs\\\\Documents\\\\GitHub\\\\Controllable-magnetic-assisted-DLP-3D-printing-project\\\\python_code\\\\webapp_data\\\\printer_state.json'"
+    },
+    {
+      "time": "2026-03-25T20:03:47",
+      "level": "info",
+      "message": "切片包已上传，共 3 张图像"
+    },
+    {
+      "time": "2026-03-25T20:03:47",
+      "level": "info",
+      "message": "自动打印已启动，共 3 层"
+    },
+    {
+      "time": "2026-03-25T20:03:47",
+      "level": "info",
+      "message": "第 1/3 层: 切换到 100pixel.png"
+    },
+    {
+      "time": "2026-03-25T20:03:47",
+      "level": "info",
+      "message": "已切换到图层图像: 100pixel.png"
+    },
+    {
+      "time": "2026-03-25T20:03:48",
+      "level": "warning",
+      "message": "电机真实移动失败，改用模拟位移: Traceback (most recent call last):\n  File \"C:\\Users\\mfs\\Documents\\GitHub\\Controllable-magnetic-assisted-DLP-3D-printing-project\\python_code\\motor_api.py\", line 2, in <module>\n    import pigpio\nModuleNotFoundError: No module named 'pigpio'"
+    },
+    {
+      "time": "2026-03-25T20:03:48",
+      "level": "info",
+      "message": "第 1 层: 电机上移 10.0um"
+    },
+    {
+      "time": "2026-03-25T20:03:48",
+      "level": "warning",
+      "message": "电机真实移动失败，改用模拟位移: Traceback (most recent call last):\n  File \"C:\\Users\\mfs\\Documents\\GitHub\\Controllable-magnetic-assisted-DLP-3D-printing-project\\python_code\\motor_api.py\", line 2, in <module>\n    import pigpio\nModuleNotFoundError: No module named 'pigpio'"
+    },
+    {
+      "time": "2026-03-25T20:03:48",
+      "level": "info",
+      "message": "第 1 层: 电机下移 10.0um"
+    },
+    {
+      "time": "2026-03-25T20:03:48",
+      "level": "info",
+      "message": "第 1 层: 完成曝光 0.05s / 功率 80"
+    },
+    {
+      "time": "2026-03-25T20:03:48",
+      "level": "info",
+      "message": "第 2/3 层: 切换到 pattern_0.png"
+    },
+    {
+      "time": "2026-03-25T20:03:48",
+      "level": "info",
+      "message": "已切换到图层图像: pattern_0.png"
+    },
+    {
+      "time": "2026-03-25T20:03:49",
+      "level": "warning",
+      "message": "电机真实移动失败，改用模拟位移: Traceback (most recent call last):\n  File \"C:\\Users\\mfs\\Documents\\GitHub\\Controllable-magnetic-assisted-DLP-3D-printing-project\\python_code\\motor_api.py\", line 2, in <module>\n    import pigpio\nModuleNotFoundError: No module named 'pigpio'"
+    },
+    {
+      "time": "2026-03-25T20:03:49",
+      "level": "info",
+      "message": "第 2 层: 电机上移 10.0um"
+    },
+    {
+      "time": "2026-03-25T20:03:49",
+      "level": "warning",
+      "message": "电机真实移动失败，改用模拟位移: Traceback (most recent call last):\n  File \"C:\\Users\\mfs\\Documents\\GitHub\\Controllable-magnetic-assisted-DLP-3D-printing-project\\python_code\\motor_api.py\", line 2, in <module>\n    import pigpio\nModuleNotFoundError: No module named 'pigpio'"
+    },
+    {
+      "time": "2026-03-25T20:03:49",
+      "level": "info",
+      "message": "第 2 层: 电机下移 10.0um"
+    },
+    {
+      "time": "2026-03-25T20:03:49",
+      "level": "info",
+      "message": "第 2 层: 完成曝光 0.05s / 功率 80"
+    },
+    {
+      "time": "2026-03-25T20:03:50",
+      "level": "info",
+      "message": "第 3/3 层: 切换到 pattern_1.png"
+    },
+    {
+      "time": "2026-03-25T20:03:50",
+      "level": "info",
+      "message": "已切换到图层图像: pattern_1.png"
+    },
+    {
+      "time": "2026-03-25T20:03:50",
+      "level": "warning",
+      "message": "电机真实移动失败，改用模拟位移: Traceback (most recent call last):\n  File \"C:\\Users\\mfs\\Documents\\GitHub\\Controllable-magnetic-assisted-DLP-3D-printing-project\\python_code\\motor_api.py\", line 2, in <module>\n    import pigpio\nModuleNotFoundError: No module named 'pigpio'"
+    },
+    {
+      "time": "2026-03-25T20:03:50",
+      "level": "info",
+      "message": "第 3 层: 电机上移 10.0um"
+    },
+    {
+      "time": "2026-03-25T20:03:50",
+      "level": "warning",
+      "message": "电机真实移动失败，改用模拟位移: Traceback (most recent call last):\n  File \"C:\\Users\\mfs\\Documents\\GitHub\\Controllable-magnetic-assisted-DLP-3D-printing-project\\python_code\\motor_api.py\", line 2, in <module>\n    import pigpio\nModuleNotFoundError: No module named 'pigpio'"
+    },
+    {
+      "time": "2026-03-25T20:03:50",
+      "level": "info",
+      "message": "第 3 层: 电机下移 10.0um"
+    },
+    {
+      "time": "2026-03-25T20:03:51",
+      "level": "info",
+      "message": "第 3 层: 完成曝光 0.05s / 功率 80"
+    },
+    {
+      "time": "2026-03-25T20:03:51",
+      "level": "warning",
+      "message": "电机真实移动失败，改用模拟位移: Traceback (most recent call last):\n  File \"C:\\Users\\mfs\\Documents\\GitHub\\Controllable-magnetic-assisted-DLP-3D-printing-project\\python_code\\motor_api.py\", line 2, in <module>\n    import pigpio\nModuleNotFoundError: No module named 'pigpio'"
+    },
+    {
+      "time": "2026-03-25T20:03:51",
+      "level": "info",
+      "message": "打印完成后自动提起 5000.0um"
+    },
+    {
+      "time": "2026-03-25T20:03:51",
+      "level": "info",
+      "message": "自动打印任务已完成"
+    },
+    {
+      "time": "2026-03-25T20:47:34",
+      "level": "warning",
+      "message": "电机真实移动失败，改用模拟位移: Traceback (most recent call last):\n  File \"/home/mfs/python_code/motor_api.py\", line 2, in <module>\n    import pigpio\nModuleNotFoundError: No module named 'pigpio'"
+    },
+    {
+      "time": "2026-03-25T20:47:34",
+      "level": "info",
+      "message": "模拟移动完成: down 10.0um"
+    },
+    {
+      "time": "2026-03-25T20:47:40",
+      "level": "warning",
+      "message": "电机真实移动失败，改用模拟位移: Traceback (most recent call last):\n  File \"/home/mfs/python_code/motor_api.py\", line 2, in <module>\n    import pigpio\nModuleNotFoundError: No module named 'pigpio'"
+    },
+    {
+      "time": "2026-03-25T20:47:40",
+      "level": "info",
+      "message": "模拟移动完成: down 10.0um"
+    },
+    {
+      "time": "2026-03-25T20:48:01",
+      "level": "info",
+      "message": "磁场控制已连接"
+    },
+    {
+      "time": "2026-03-25T20:48:02",
+      "level": "info",
+      "message": "磁场控制已连接"
+    },
+    {
+      "time": "2026-03-25T20:48:03",
+      "level": "info",
+      "message": "磁场控制已连接"
+    },
+    {
+      "time": "2026-03-25T20:49:16",
+      "level": "info",
+      "message": "自动打印已启动，共 3 层"
+    },
+    {
+      "time": "2026-03-25T20:49:16",
+      "level": "info",
+      "message": "第 1/3 层: 切换到 100pixel.png"
+    },
+    {
+      "time": "2026-03-25T20:49:16",
+      "level": "info",
+      "message": "已切换到图层图像: 100pixel.png"
+    },
+    {
+      "time": "2026-03-25T20:49:17",
+      "level": "warning",
+      "message": "电机真实移动失败，改用模拟位移: Traceback (most recent call last):\n  File \"/home/mfs/python_code/motor_api.py\", line 2, in <module>\n    import pigpio\nModuleNotFoundError: No module named 'pigpio'"
+    },
+    {
+      "time": "2026-03-25T20:49:17",
+      "level": "info",
+      "message": "第 1 层: 电机上移 10.0um"
+    },
+    {
+      "time": "2026-03-25T20:49:17",
+      "level": "warning",
+      "message": "电机真实移动失败，改用模拟位移: Traceback (most recent call last):\n  File \"/home/mfs/python_code/motor_api.py\", line 2, in <module>\n    import pigpio\nModuleNotFoundError: No module named 'pigpio'"
+    },
+    {
+      "time": "2026-03-25T20:49:17",
+      "level": "info",
+      "message": "第 1 层: 电机下移 10.0um"
+    },
+    {
+      "time": "2026-03-25T20:49:17",
+      "level": "info",
+      "message": "第 1 层: 完成曝光 0.05s / 功率 80"
+    },
+    {
+      "time": "2026-03-25T20:49:17",
+      "level": "info",
+      "message": "第 2/3 层: 切换到 pattern_0.png"
+    },
+    {
+      "time": "2026-03-25T20:49:17",
+      "level": "info",
+      "message": "已切换到图层图像: pattern_0.png"
+    },
+    {
+      "time": "2026-03-25T20:49:18",
+      "level": "warning",
+      "message": "电机真实移动失败，改用模拟位移: Traceback (most recent call last):\n  File \"/home/mfs/python_code/motor_api.py\", line 2, in <module>\n    import pigpio\nModuleNotFoundError: No module named 'pigpio'"
+    },
+    {
+      "time": "2026-03-25T20:49:18",
+      "level": "info",
+      "message": "第 2 层: 电机上移 10.0um"
+    },
+    {
+      "time": "2026-03-25T20:49:18",
+      "level": "warning",
+      "message": "电机真实移动失败，改用模拟位移: Traceback (most recent call last):\n  File \"/home/mfs/python_code/motor_api.py\", line 2, in <module>\n    import pigpio\nModuleNotFoundError: No module named 'pigpio'"
+    },
+    {
+      "time": "2026-03-25T20:49:18",
+      "level": "info",
+      "message": "第 2 层: 电机下移 10.0um"
+    },
+    {
+      "time": "2026-03-25T20:49:19",
+      "level": "info",
+      "message": "第 2 层: 完成曝光 0.05s / 功率 80"
+    },
+    {
+      "time": "2026-03-25T20:49:19",
+      "level": "info",
+      "message": "第 3/3 层: 切换到 pattern_1.png"
+    },
+    {
+      "time": "2026-03-25T20:49:19",
+      "level": "info",
+      "message": "已切换到图层图像: pattern_1.png"
+    },
+    {
+      "time": "2026-03-25T20:49:19",
+      "level": "warning",
+      "message": "电机真实移动失败，改用模拟位移: Traceback (most recent call last):\n  File \"/home/mfs/python_code/motor_api.py\", line 2, in <module>\n    import pigpio\nModuleNotFoundError: No module named 'pigpio'"
+    },
+    {
+      "time": "2026-03-25T20:49:19",
+      "level": "info",
+      "message": "第 3 层: 电机上移 10.0um"
+    },
+    {
+      "time": "2026-03-25T20:49:20",
+      "level": "warning",
+      "message": "电机真实移动失败，改用模拟位移: Traceback (most recent call last):\n  File \"/home/mfs/python_code/motor_api.py\", line 2, in <module>\n    import pigpio\nModuleNotFoundError: No module named 'pigpio'"
+    },
+    {
+      "time": "2026-03-25T20:49:20",
+      "level": "info",
+      "message": "第 3 层: 电机下移 10.0um"
+    },
+    {
+      "time": "2026-03-25T20:49:20",
+      "level": "info",
+      "message": "第 3 层: 完成曝光 0.05s / 功率 80"
+    },
+    {
+      "time": "2026-03-25T20:49:20",
+      "level": "warning",
+      "message": "电机真实移动失败，改用模拟位移: Traceback (most recent call last):\n  File \"/home/mfs/python_code/motor_api.py\", line 2, in <module>\n    import pigpio\nModuleNotFoundError: No module named 'pigpio'"
+    },
+    {
+      "time": "2026-03-25T20:49:20",
+      "level": "info",
+      "message": "打印完成后自动提起 5000.0um"
+    },
+    {
+      "time": "2026-03-25T20:49:20",
+      "level": "info",
+      "message": "自动打印任务已完成"
+    },
+    {
+      "time": "2026-03-25T20:49:35",
+      "level": "warning",
+      "message": "电机真实移动失败，改用模拟位移: Traceback (most recent call last):\n  File \"/home/mfs/python_code/motor_api.py\", line 2, in <module>\n    import pigpio\nModuleNotFoundError: No module named 'pigpio'"
+    },
+    {
+      "time": "2026-03-25T20:49:35",
+      "level": "info",
+      "message": "模拟移动完成: up 10.0um"
+    },
+    {
+      "time": "2026-03-25T20:52:30",
+      "level": "info",
+      "message": "磁场控制已连接"
+    },
+    {
+      "time": "2026-03-25T20:52:32",
+      "level": "warning",
+      "message": "电机真实连接失败，切换为模拟状态: 连接 pigpio 失败，请先启动 pigpiod"
+    },
+    {
+      "time": "2026-03-25T20:52:32",
+      "level": "info",
+      "message": "电机模拟接口已连接"
+    },
+    {
+      "time": "2026-03-25T20:52:33",
+      "level": "warning",
+      "message": "UV 光机未进入真实串口模式，已启用模拟接口: pyserial 不可用: No module named 'serial'"
+    },
+    {
+      "time": "2026-03-25T20:52:33",
+      "level": "info",
+      "message": "UV 光机模拟接口已连接"
+    },
+    {
+      "time": "2026-03-25T20:55:25",
+      "level": "warning",
+      "message": "UV 光机未进入真实串口模式，已启用模拟接口: [Errno 2] could not open port /dev/ttyUSB0: [Errno 2] No such file or directory: '/dev/ttyUSB0'"
+    },
+    {
+      "time": "2026-03-25T20:55:25",
+      "level": "info",
+      "message": "UV 光机模拟接口已连接"
+    },
+    {
+      "time": "2026-03-25T20:55:27",
+      "level": "warning",
+      "message": "UV 光机未进入真实串口模式，已启用模拟接口: [Errno 2] could not open port /dev/ttyUSB0: [Errno 2] No such file or directory: '/dev/ttyUSB0'"
+    },
+    {
+      "time": "2026-03-25T20:55:27",
+      "level": "info",
+      "message": "UV 光机模拟接口已连接"
+    },
+    {
+      "time": "2026-03-25T20:55:28",
+      "level": "warning",
+      "message": "UV 光机未进入真实串口模式，已启用模拟接口: [Errno 2] could not open port /dev/ttyUSB0: [Errno 2] No such file or directory: '/dev/ttyUSB0'"
+    },
+    {
+      "time": "2026-03-25T20:55:28",
+      "level": "info",
+      "message": "UV 光机模拟接口已连接"
+    },
+    {
+      "time": "2026-03-25T20:55:28",
+      "level": "warning",
+      "message": "UV 光机未进入真实串口模式，已启用模拟接口: [Errno 2] could not open port /dev/ttyUSB0: [Errno 2] No such file or directory: '/dev/ttyUSB0'"
+    },
+    {
+      "time": "2026-03-25T20:55:28",
+      "level": "info",
+      "message": "UV 光机模拟接口已连接"
+    },
+    {
+      "time": "2026-03-25T20:55:31",
+      "level": "warning",
+      "message": "电机真实连接失败，切换为模拟状态: 连接 pigpio 失败，请先启动 pigpiod"
+    },
+    {
+      "time": "2026-03-25T20:55:31",
+      "level": "info",
+      "message": "电机模拟接口已连接"
+    },
+    {
+      "time": "2026-03-25T20:55:31",
+      "level": "info",
+      "message": "磁场控制已连接"
+    }
+  ]
+}

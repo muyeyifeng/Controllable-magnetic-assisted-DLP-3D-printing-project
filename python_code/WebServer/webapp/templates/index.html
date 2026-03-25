@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>设备控制面板</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+  <div class="cp-page">
+    <header class="cp-topbar">
+      <div>状态：<span id="statusText">待机</span></div>
+      <div>UV 光机：<span id="uvStatus">未连接</span> <button data-device="uv">连接</button></div>
+      <div>电机：<span id="motorStatus">未连接</span> <button data-device="motor">连接</button></div>
+      <div>磁场：<span id="magnetStatus">未连接</span> <button data-device="magnet">连接</button></div>
+    </header>
+
+    <main class="cp-main">
+      <section class="cp-panel cp-main-display">
+        <div class="cp-preview-header">
+          <div>
+            <div class="cp-panel-eyebrow">DLP 3D Printing</div>
+            <div class="cp-main-title">当前曝光层预览</div>
+          </div>
+          <div class="cp-main-value">第 <span id="currentLayerDisplay">1</span> / <span id="totalLayersDisplay">0</span> 层</div>
+        </div>
+
+        <div class="cp-preview-body">
+          <img id="previewImage" class="cp-layer-image" alt="当前层图像预览">
+          <div id="previewEmpty" class="cp-empty">上传 ZIP 切片包后，这里会显示当前层图像。</div>
+        </div>
+
+        <div class="cp-preview-footer">
+          <div class="cp-preview-stats">
+            <div>曝光时间：<span id="previewExposureTime">1.5</span> s</div>
+            <div>曝光强度：<span id="previewExposurePower">80</span></div>
+            <div>打印进度：<span id="progressText">0%</span></div>
+          </div>
+          <div class="cp-navigation-buttons">
+            <button id="prevLayerButton">上一页</button>
+            <button id="nextLayerButton">下一页</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="cp-middle">
+        <div class="cp-panel cp-info-panel">
+          <div class="cp-panel-title">信息</div>
+          <div id="infoWindow" class="cp-info-content">等待切片包上传与设备连接。</div>
+        </div>
+
+        <div class="cp-upload-card">
+          <button type="button" class="cp-btn cp-upload-btn" id="zipUploadBtn">上传切片 ZIP</button>
+          <input type="file" id="zipFileInput" accept=".zip,application/zip" hidden>
+          <div class="cp-upload-hint">支持 `png/jpg/bmp/webp/gif` 图层图像，浏览器断开不会中断后台执行。</div>
+        </div>
+
+        <div class="cp-panel cp-log-panel">
+          <div class="cp-panel-title">日志状态</div>
+          <div id="logContent" class="cp-log-content"></div>
+        </div>
+      </section>
+
+      <section class="cp-right">
+        <div class="cp-right-row cp-right-row-3">
+          <div class="cp-panel cp-input-panel">
+            <div class="cp-input-title">快速下降距离 (um)</div>
+            <input type="number" step="100" data-setting="fast_down_distance_um">
+          </div>
+          <div class="cp-panel cp-input-panel">
+            <div class="cp-input-title">速度 (um/s)</div>
+            <input type="number" step="1" data-setting="fast_down_speed_um_s">
+          </div>
+          <button class="cp-btn cp-action-btn" data-manual="fast-down">手动快速下降</button>
+        </div>
+
+        <div class="cp-right-row cp-right-row-3">
+          <div class="cp-panel cp-input-panel">
+            <div class="cp-input-title">快速上升距离 (um)</div>
+            <input type="number" step="100" data-setting="fast_up_distance_um">
+          </div>
+          <div class="cp-panel cp-input-panel">
+            <div class="cp-input-title">速度 (um/s)</div>
+            <input type="number" step="1" data-setting="fast_up_speed_um_s">
+          </div>
+          <button class="cp-btn cp-action-btn" data-manual="fast-up">手动快速上升</button>
+        </div>
+
+        <div class="cp-right-row cp-right-row-4">
+          <div class="cp-panel cp-input-panel">
+            <div class="cp-input-title">慢速下降速度 (um/s)</div>
+            <input type="number" step="1" data-setting="slow_down_speed_um_s">
+          </div>
+          <button class="cp-btn cp-action-btn" data-manual="slow-down">手动慢速下降</button>
+          <div class="cp-panel cp-input-panel">
+            <div class="cp-input-title">慢速上升速度 (um/s)</div>
+            <input type="number" step="1" data-setting="slow_up_speed_um_s">
+          </div>
+          <button class="cp-btn cp-action-btn" data-manual="slow-up">手动慢速上升</button>
+        </div>
+
+        <div class="cp-right-row cp-right-row-3">
+          <div class="cp-panel cp-input-panel">
+            <div class="cp-input-title">层间等待 (s)</div>
+            <input type="number" step="0.1" data-setting="inter_layer_delay_s">
+          </div>
+          <div class="cp-panel cp-input-panel">
+            <div class="cp-input-title">完成后自动提起</div>
+            <input type="number" step="100" data-setting="auto_pull_up_distance_um">
+          </div>
+          <label class="cp-panel cp-toggle-panel">
+            <span class="cp-input-title">启用完成后提起</span>
+            <input type="checkbox" data-setting="auto_pull_up_after_finish">
+          </label>
+        </div>
+
+        <div class="cp-right-row cp-right-row-3">
+          <div class="cp-panel cp-input-panel">
+            <div class="cp-input-title">曝光时间 (s)</div>
+            <input type="number" step="0.1" data-setting="exposure_time_s">
+          </div>
+          <div class="cp-panel cp-input-panel">
+            <div class="cp-input-title">曝光强度 (0-255)</div>
+            <input type="number" step="1" min="0" max="255" data-setting="exposure_power">
+          </div>
+          <button class="cp-btn cp-action-btn" data-manual="expose">手动曝光</button>
+        </div>
+
+        <div class="cp-right-row cp-right-row-3">
+          <div class="cp-panel cp-input-panel">
+            <div class="cp-input-title">磁场强度 (V)</div>
+            <input type="number" step="0.05" min="0" max="5" data-setting="magnet_voltage">
+          </div>
+          <label class="cp-panel cp-toggle-panel">
+            <span class="cp-input-title">自动打印启用磁场</span>
+            <input type="checkbox" data-setting="magnet_enabled_for_job">
+          </label>
+          <label class="cp-panel cp-toggle-panel">
+            <span class="cp-input-title">层间保持磁场</span>
+            <input type="checkbox" data-setting="magnet_keep_on_between_layers">
+          </label>
+        </div>
+
+        <div class="cp-right-row cp-right-row-3">
+          <div class="cp-panel cp-state-card">
+            <div class="cp-input-title">电机位置</div>
+            <div id="motorPositionValue" class="cp-state-value">0 um</div>
+          </div>
+          <div class="cp-panel cp-state-card">
+            <div class="cp-input-title">当前模式</div>
+            <div id="machineStateValue" class="cp-state-value">idle</div>
+          </div>
+          <div class="cp-panel cp-state-card">
+            <div class="cp-input-title">当前磁场</div>
+            <div id="magnetStateValue" class="cp-state-value">0.00 V</div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="cp-bottom-bar">
+      <button class="cp-btn cp-bottom-btn" id="homeButton">机械归零</button>
+      <button class="cp-btn cp-bottom-btn" id="pullUpButton">提起</button>
+      <button class="cp-btn cp-bottom-btn" id="pauseButton">暂停</button>
+      <button class="cp-btn cp-bottom-btn" id="resumeButton">继续</button>
+      <button class="cp-btn cp-bottom-btn cp-bottom-btn-wide" id="magnetToggleButton">磁场测试开关</button>
+      <button class="cp-btn cp-bottom-btn cp-bottom-btn-accent" id="startPrintButton">自动打印</button>
+      <button class="cp-btn cp-bottom-btn cp-bottom-btn-danger" id="stopPrintButton">停止任务</button>
+    </footer>
+  </div>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

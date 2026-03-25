@@ -101,11 +101,19 @@ function renderPreview(snapshot) {
 
 function renderInfo(snapshot) {
   const job = snapshot.job;
+  const motor = snapshot.devices.motor || {};
+  const magnet = snapshot.devices.magnet || {};
   const info = [
     `当前状态: ${snapshot.status_text}`,
     `任务阶段: ${job.phase}`,
     `已完成层数: ${job.completed_layers}/${job.total_layers}`,
-    `当前图像: ${job.current_image_name || "无"}`,
+    `当前图像: ${job.current_image_name || "-"}`,
+    `电机位置: ${Number(motor.position_um || 0).toFixed(2)} um`,
+    `电机步数: ${motor.position_steps ?? 0}`,
+    `上限位状态: ${motor.top_limit_triggered ? "已触发" : "未触发"}`,
+    `电机运动状态: ${motor.is_moving ? `运动中(${motor.direction || "-"})` : "空闲"}`,
+    `磁场电压: ${Number(snapshot.devices.magnet.voltage || 0).toFixed(2)} V`,
+    `磁场 IO 电平: ${magnet.io_level || "-"}`,
     `任务开始时间: ${job.started_at || "-"}`,
     `任务结束时间: ${job.finished_at || "-"}`,
     `错误信息: ${job.error || "-"}`,
@@ -119,7 +127,8 @@ function renderSnapshot(snapshot) {
   $("uvStatus").textContent = formatDeviceStatus(snapshot.devices.uv);
   $("motorStatus").textContent = formatDeviceStatus(snapshot.devices.motor);
   $("magnetStatus").textContent = formatDeviceStatus(snapshot.devices.magnet);
-  $("motorPositionValue").textContent = `${Number(snapshot.devices.motor.position_um || 0).toFixed(2)} um`;
+  $("motorPositionValue").textContent =
+    `${Number(snapshot.devices.motor.position_um || 0).toFixed(2)} um / ${Number(snapshot.devices.motor.position_steps || 0)} steps`;
   $("machineStateValue").textContent = snapshot.machine_state;
   $("magnetStateValue").textContent = `${Number(snapshot.devices.magnet.voltage || 0).toFixed(2)} V`;
   uiState.manualMagnetEnabled = Boolean(snapshot.devices.magnet.enabled);
@@ -302,7 +311,7 @@ function bindEvents() {
 async function init() {
   bindEvents();
   await loadState();
-  uiState.pollHandle = setInterval(loadState, 1500);
+  uiState.pollHandle = setInterval(loadState, 1000);
 }
 
 window.addEventListener("DOMContentLoaded", init);

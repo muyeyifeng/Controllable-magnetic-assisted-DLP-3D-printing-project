@@ -1,12 +1,16 @@
 {
   "machine_state": "idle",
   "status_text": "打印完成",
-  "updated_at": "2026-03-25T20:55:31",
+  "updated_at": "2026-03-25T23:05:29",
   "devices": {
     "motor": {
       "connected": true,
       "message": "已连接",
-      "position_um": 0.0
+      "position_um": 0.0,
+      "position_steps": 0,
+      "top_limit_triggered": false,
+      "is_moving": false,
+      "direction": null
     },
     "uv": {
       "connected": true,
@@ -18,7 +22,9 @@
       "connected": true,
       "message": "已连接",
       "enabled": false,
-      "voltage": 0.0
+      "voltage": 0.0,
+      "io_level": "low",
+      "i2c_addresses": []
     }
   },
   "images": {
@@ -83,12 +89,18 @@
     "motor_ena_active_low": true,
     "motor_pulse_width_us": 20,
     "motor_chunk_steps": 200,
-    "motor_state_file": "C:\\Users\\mfs\\Documents\\GitHub\\Controllable-magnetic-assisted-DLP-3D-printing-project\\python_code\\webapp_data\\motor_state.json",
+    "motor_state_file": "C:\\Users\\mfs\\Documents\\GitHub\\Controllable-magnetic-assisted-DLP-3D-printing-project\\python_code\\WebServer\\webapp_data\\motor_state.json",
+    "motor_progress_file": "C:\\Users\\mfs\\Documents\\GitHub\\Controllable-magnetic-assisted-DLP-3D-printing-project\\python_code\\WebServer\\webapp_data\\motor_progress.json",
+    "motor_home_max_steps": 200000,
+    "motor_home_speed_um_s": 1500,
     "uv_port": "/dev/ttyUSB0",
     "uv_baudrate": 115200,
     "uv_timeout_s": 1.0,
     "magnet_i2c_bus": 1,
-    "magnet_i2c_addr": "0x60",
+    "magnet_i2c_addr_primary": "0x60",
+    "magnet_i2c_addr_secondary": "0x61",
+    "magnet_io_pin": 21,
+    "magnet_io_high_when_enabled": true,
     "auto_pull_up_after_finish": true,
     "auto_pull_up_distance_um": 5000,
     "preview_layer_index": 1

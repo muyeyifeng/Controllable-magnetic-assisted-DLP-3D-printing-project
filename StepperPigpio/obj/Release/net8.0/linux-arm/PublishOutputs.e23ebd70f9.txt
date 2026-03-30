@@ -1,5 +1,0 @@
-/home/mfs/StepperPigpio/bin/Release/net8.0/linux-arm/publish/StepperPigpio
-/home/mfs/StepperPigpio/bin/Release/net8.0/linux-arm/publish/StepperPigpio.dll
-/home/mfs/StepperPigpio/bin/Release/net8.0/linux-arm/publish/StepperPigpio.deps.json
-/home/mfs/StepperPigpio/bin/Release/net8.0/linux-arm/publish/StepperPigpio.runtimeconfig.json
-/home/mfs/StepperPigpio/bin/Release/net8.0/linux-arm/publish/StepperPigpio.pdb

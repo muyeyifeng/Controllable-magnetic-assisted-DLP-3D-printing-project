@@ -1,0 +1,85 @@
+﻿{
+  "dlp": {
+    "port": "/dev/ttyUSB0",
+    "baudrate": 115200,
+    "timeout_s": 1.0,
+    "reconnect_retries": 3,
+    "reconnect_delay_s": 0.5
+  },
+  "projection": {
+    "display": ":0",
+    "xauthority": "/home/mfs/.Xauthority",
+    "switch_settle_s": 0.25,
+    "viewer_cmd_template": [
+      "fbi",
+      "-T",
+      "1",
+      "-d",
+      "/dev/fb0",
+      "-a",
+      "--noverbose",
+      "{image}"
+    ]
+  },
+  "images": {
+    "mode": "sequence",
+    "single_image": "test_images/pattern_0.png",
+    "sequence_dir": "test_images",
+    "extensions": [".png", ".bmp", ".jpg", ".jpeg"]
+  },
+  "stepper": {
+    "pul_pin": 13,
+    "dir_pin": 5,
+    "ena_pin": 8,
+    "ena_active_low": true,
+    "top_sensor_pin": 20,
+    "top_stop_level": 0,
+    "top_pull": "none",
+    "steps_per_rev": 3200,
+    "lead_mm": 4.0,
+    "pulse_width_us": 20,
+    "home_max_steps": 0,
+    "home_freq_hz": 3200
+  },
+  "motion": {
+    "max_travel_um": 221600.0,
+    "coarse_distance_to_bottom_um": 300.0,
+    "fast_freq_hz": 3200,
+    "slow_freq_hz": 800,
+    "final_slow_up_um": 500.0
+  },
+  "print": {
+    "total_layers": 5,
+    "layer_thickness_um": 50.0,
+    "defaults": {
+      "brightness": 120,
+      "exposure_s": 2.0,
+      "lift_um": 300.0
+    },
+    "layer_overrides": [
+      {
+        "layer": 1,
+        "brightness": 150,
+        "exposure_s": 4.0,
+        "lift_um": 400.0,
+        "magnet": {
+          "enabled": false,
+          "test_call_tca_script": false,
+          "io23": [1, 0, 0, 0],
+          "io27": [0, 1, 0, 0],
+          "dac_voltage": 2.3,
+          "hold_s": 0.2
+        }
+      },
+      {
+        "layer": 2,
+        "brightness": 130,
+        "exposure_s": 2.5,
+        "lift_um": 300.0,
+        "magnet": {
+          "enabled": false
+        }
+      }
+    ]
+  }
+}

@@ -113,7 +113,7 @@ def main():
     ap.add_argument("--read-probe", action="store_true", help="用 read_byte 探测（有些设备不响应 write_quick）")
 
     # TCA9548A 相关
-    ap.add_argument("--tca", type=lambda x: int(x, 0), default=None, help="TCA9548A 地址（例如 0x70）；指定后扫描子通道")
+    ap.add_argument("--tca", type=lambda x: int(x, 0), default=0x70, help="TCA9548A 地址（例如 0x70）；指定后扫描子通道")
     ap.add_argument("--ch", default="0-7", help="TCA 通道范围，如 0-7 或 0,1,4")
 
     args = ap.parse_args()

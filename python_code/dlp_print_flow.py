@@ -381,6 +381,70 @@ def load_json(path: Path) -> dict[str, Any]:
         return json.load(f)
 
 
+def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+    try:
+        dir_fd = os.open(str(path.parent), os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except Exception:
+        # Not all filesystems support fsync on directories.
+        pass
+
+
+def load_progress(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        with path.open("r", encoding="utf-8-sig") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except Exception as exc:
+        print(f"[Progress] failed to read {path}: {exc}")
+    return None
+
+
+def resolve_progress_settings(cfg: dict[str, Any], cfg_path: Path) -> tuple[bool, Path, bool]:
+    p_cfg = cfg.get("progress", {})
+    enabled = bool(p_cfg.get("enabled", True))
+    default_name = f"{cfg_path.stem}.progress.json"
+    raw_path = str(p_cfg.get("path", default_name))
+    progress_path = _resolve_cfg_path(cfg_path.parent, raw_path)
+    auto_resume = bool(p_cfg.get("auto_resume", True))
+    return enabled, progress_path, auto_resume
+
+
+def build_progress_payload(
+    *,
+    cfg_path: Path,
+    total_layers: int,
+    completed_layers: int,
+    completed_thickness_um: float,
+    max_travel_um: float,
+    status: str,
+) -> dict[str, Any]:
+    return {
+        "version": 1,
+        "updated_at_epoch_s": time.time(),
+        "status": status,
+        "config_path": str(cfg_path),
+        "total_layers": int(total_layers),
+        "completed_layers": int(completed_layers),
+        "completed_thickness_um": float(round(completed_thickness_um, 6)),
+        "next_layer": int(completed_layers + 1),
+        "max_travel_um": float(max_travel_um),
+    }
+
+
 def _resolve_cfg_path(base_dir: Path, raw_path: str) -> Path:
     p = Path(raw_path).expanduser()
     if not p.is_absolute():
@@ -416,6 +480,9 @@ def resolve_layer_images(cfg: dict[str, Any], base_dir: Path) -> list[Path]:
             raise FlowError(f"No images found in sequence dir: {d}")
         requested = int(cfg["print"].get("total_layers", 0))
         if requested <= 0:
+            plan = cfg["print"].get("thickness_plan", [])
+            requested = sum(int(x.get("layers", 0)) for x in plan)
+        if requested <= 0:
             return files
         if len(files) < requested:
             raise FlowError(f"Need {requested} images but only found {len(files)} in {d}")
@@ -434,6 +501,30 @@ def layer_params_for(idx0: int, cfg: dict[str, Any]) -> LayerParams:
         lift_um=float(default["lift_um"]),
         magnet=None,
     )
+
+    # Optional plan-level process parameters (brightness/exposure/lift/magnet)
+    # can be defined together with thickness_plan segments.
+    plan = pr.get("thickness_plan", [])
+    if plan:
+        idx1 = idx0 + 1
+        cursor = 0
+        for item in plan:
+            n = int(item.get("layers", 0))
+            if n <= 0:
+                raise FlowError(f"Invalid thickness_plan item layers: {item}")
+            start = cursor + 1
+            end = cursor + n
+            if start <= idx1 <= end:
+                if "brightness" in item:
+                    p.brightness = int(item["brightness"])
+                if "exposure_s" in item:
+                    p.exposure_s = float(item["exposure_s"])
+                if "lift_um" in item:
+                    p.lift_um = float(item["lift_um"])
+                if "magnet" in item:
+                    p.magnet = item["magnet"]
+                break
+            cursor = end
 
     overrides = pr.get("layer_overrides", [])
     idx1 = idx0 + 1
@@ -541,6 +632,7 @@ def run_flow(cfg: dict[str, Any], cfg_path: Path) -> None:
 
     dlp_retries = int(cfg["dlp"].get("reconnect_retries", 3))
     dlp_reconnect_delay_s = float(cfg["dlp"].get("reconnect_delay_s", 0.5))
+    progress_enabled, progress_path, auto_resume = resolve_progress_settings(cfg, cfg_path)
 
     print(f"[Flow] total_layers={total_layers}, thickness_plan={'enabled' if 'thickness_plan' in cfg['print'] else 'fixed'}")
 
@@ -553,6 +645,46 @@ def run_flow(cfg: dict[str, Any], cfg_path: Path) -> None:
     projector = ProjectorController(cfg["projection"], layer_images)
 
     current_from_top_um = 0.0
+    start_layer_idx = 0
+    printed_build_um = 0.0
+    completed_layers = 0
+    progress_written_for_status = False
+
+    if progress_enabled:
+        saved = load_progress(progress_path)
+        if saved and auto_resume:
+            saved_total = int(saved.get("total_layers", -1))
+            saved_done = int(saved.get("completed_layers", 0))
+            saved_thickness = float(saved.get("completed_thickness_um", 0.0))
+            if (
+                saved_total == total_layers
+                and 0 < saved_done < total_layers
+                and 0.0 <= saved_thickness <= sum(thickness_seq)
+            ):
+                start_layer_idx = saved_done
+                printed_build_um = saved_thickness
+                completed_layers = saved_done
+                print(
+                    f"[Progress] resume enabled: completed_layers={saved_done}/{total_layers}, "
+                    f"completed_thickness_um={saved_thickness:.3f}"
+                )
+            elif saved_total != -1 and saved_total != total_layers:
+                print(
+                    f"[Progress] ignore saved progress due to layer mismatch: "
+                    f"saved={saved_total}, current={total_layers}"
+                )
+
+        atomic_write_json(
+            progress_path,
+            build_progress_payload(
+                cfg_path=cfg_path,
+                total_layers=total_layers,
+                completed_layers=start_layer_idx,
+                completed_thickness_um=printed_build_um,
+                max_travel_um=max_travel_um,
+                status="running",
+            ),
+        )
 
     try:
         # Step 2: home first, then down to bottom.
@@ -560,9 +692,18 @@ def run_flow(cfg: dict[str, Any], cfg_path: Path) -> None:
         stepper.home_to_top()
         current_from_top_um = 0.0
 
-        print(f"[Step 2] Down to bottom: {max_travel_um}um")
-        stepper.move_relative_um("down", max_travel_um, freq_position)
-        current_from_top_um = max_travel_um
+        if printed_build_um > 0.0:
+            target_from_top_um = max(0.0, max_travel_um - printed_build_um)
+            print(
+                f"[Step 2] Resume positioning from top: down to {target_from_top_um:.3f}um "
+                f"(max_travel_um={max_travel_um}, completed_thickness_um={printed_build_um:.3f})"
+            )
+            stepper.move_relative_um("down", target_from_top_um, freq_position)
+            current_from_top_um = target_from_top_um
+        else:
+            print(f"[Step 2] Down to bottom: {max_travel_um}um")
+            stepper.move_relative_um("down", max_travel_um, freq_position)
+            current_from_top_um = max_travel_um
 
         # Step 3: handshake and DLP on, keep LED off.
         print("\n[Step 3] DLP init (no exposure)")
@@ -574,9 +715,14 @@ def run_flow(cfg: dict[str, Any], cfg_path: Path) -> None:
             reconnect_delay_s=dlp_reconnect_delay_s,
         )
 
+        if printed_build_um > 0.0:
+            print(
+                f"[Resume] start from saved state: completed_layers={completed_layers}, "
+                f"completed_thickness_um={printed_build_um:.3f}, current_from_top_um={current_from_top_um:.3f}"
+            )
+
         # Step 4 loop.
-        cumulative_build_um = 0.0
-        for i in range(total_layers):
+        for i in range(start_layer_idx, total_layers):
             lp = layer_params_for(i, cfg)
             layer_no = i + 1
             current_thickness_um = thickness_seq[i]
@@ -595,8 +741,7 @@ def run_flow(cfg: dict[str, Any], cfg_path: Path) -> None:
             projector.show(i)
 
             # Layer target from top: bottom - build_height
-            cumulative_build_um += current_thickness_um
-            target_build_height_um = cumulative_build_um
+            target_build_height_um = printed_build_um + current_thickness_um
             target_from_top_um = max_travel_um - target_build_height_um
             # 4.3 + 4.4 global slow positioning directly to target
             current_from_top_um = move_to_abs_from_top(
@@ -632,6 +777,23 @@ def run_flow(cfg: dict[str, Any], cfg_path: Path) -> None:
                 reconnect_delay_s=dlp_reconnect_delay_s,
             )
 
+            if progress_enabled:
+                printed_build_um = target_build_height_um
+                completed_layers = layer_no
+                atomic_write_json(
+                    progress_path,
+                    build_progress_payload(
+                        cfg_path=cfg_path,
+                        total_layers=total_layers,
+                        completed_layers=completed_layers,
+                        completed_thickness_um=printed_build_um,
+                        max_travel_um=max_travel_um,
+                        status="running",
+                    ),
+                )
+            else:
+                printed_build_um = target_build_height_um
+
             # 4.8 pre-switch next image (sequence mode effect)
             if i + 1 < total_layers:
                 projector.show(i + 1)
@@ -662,7 +824,34 @@ def run_flow(cfg: dict[str, Any], cfg_path: Path) -> None:
         current_from_top_um = 0.0
 
         print("\n[Done] Print flow completed successfully")
+        if progress_enabled:
+            atomic_write_json(
+                progress_path,
+                build_progress_payload(
+                    cfg_path=cfg_path,
+                    total_layers=total_layers,
+                    completed_layers=total_layers,
+                    completed_thickness_um=sum(thickness_seq),
+                    max_travel_um=max_travel_um,
+                    status="completed",
+                ),
+            )
+            progress_written_for_status = True
 
+    except BaseException:
+        if progress_enabled and not progress_written_for_status:
+            atomic_write_json(
+                progress_path,
+                build_progress_payload(
+                    cfg_path=cfg_path,
+                    total_layers=total_layers,
+                    completed_layers=completed_layers,
+                    completed_thickness_um=printed_build_um,
+                    max_travel_um=max_travel_um,
+                    status="interrupted",
+                ),
+            )
+        raise
     finally:
         # Safety shutdown.
         try:

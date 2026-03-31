@@ -22,10 +22,15 @@
     ]
   },
   "images": {
-    "mode": "single",
-    "single_image": "test_images/100pixel.png",
-    "sequence_dir": "test_images",
+    "mode": "sequence",
+    "single_image": "slice/slice_0001.png",
+    "sequence_dir": "slice",
     "extensions": [".png", ".bmp", ".jpg", ".jpeg"]
+  },
+  "progress": {
+    "enabled": true,
+    "auto_resume": true,
+    "path": "dlp_print_progress.json"
   },
   "stepper": {
     "pul_pin": 13,
@@ -52,11 +57,11 @@
     "total_layers": 100,
     "layer_thickness_um": 50.0,
     "thickness_plan": [
-      {"layers": 20, "thickness_um": 10.0},
-      {"layers": 20, "thickness_um": 20.0},
-      {"layers": 20, "thickness_um": 30.0},
-      {"layers": 20, "thickness_um": 40.0},
-      {"layers": 20, "thickness_um": 50.0}
+      {"layers": 20, "thickness_um": 10.0, "brightness": 80, "exposure_s": 4.0, "lift_um": 2000.0},
+      {"layers": 20, "thickness_um": 20.0, "brightness": 80, "exposure_s": 5.0, "lift_um": 2000.0},
+      {"layers": 20, "thickness_um": 30.0, "brightness": 80, "exposure_s": 6.0, "lift_um": 2000.0},
+      {"layers": 20, "thickness_um": 40.0, "brightness": 80, "exposure_s": 8.0, "lift_um": 2000.0},
+      {"layers": 20, "thickness_um": 50.0, "brightness": 80, "exposure_s": 10.0, "lift_um": 2000.0}
     ],
     "defaults": {
       "brightness": 80,

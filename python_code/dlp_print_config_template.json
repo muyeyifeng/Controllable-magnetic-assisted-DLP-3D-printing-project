@@ -27,6 +27,11 @@
     "sequence_dir": "test_images",
     "extensions": [".png", ".bmp", ".jpg", ".jpeg"]
   },
+  "progress": {
+    "enabled": true,
+    "auto_resume": true,
+    "path": "dlp_print_progress.json"
+  },
   "stepper": {
     "pul_pin": 13,
     "dir_pin": 5,

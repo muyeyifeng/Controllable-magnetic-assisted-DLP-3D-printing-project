@@ -83,6 +83,15 @@ def run_cmd(cmd: list[str], *, env: dict[str, str] | None = None, cwd: Path | No
     return proc.stdout
 
 
+def run_systemctl(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["systemctl", *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+
 def check_hdmi_1920x1080() -> tuple[bool, str]:
     # 0) DRM sysfs check (works in headless/SSH on modern Raspberry Pi OS)
     try:
@@ -314,6 +323,9 @@ class ProjectorController:
         self.layer_images = layer_images
         self.proc: subprocess.Popen[str] | None = None
         self.current_image: Path | None = None
+        self.tty_service = ""
+        self.tty_restore_needed = False
+        self.tty_suppressed = False
 
     def _env(self) -> dict[str, str]:
         env = os.environ.copy()
@@ -332,7 +344,51 @@ class ProjectorController:
             "{image}",
         ]
         cmd = [str(x).replace("{image}", str(image_path)) for x in template]
+        if cmd and cmd[0] == "fbi" and "--noverbose" not in cmd:
+            cmd.insert(-1, "--noverbose")
         return cmd
+
+    def _infer_tty(self, cmd: list[str]) -> int | None:
+        if "-T" in cmd:
+            idx = cmd.index("-T")
+            if idx + 1 < len(cmd):
+                try:
+                    return int(cmd[idx + 1])
+                except Exception:
+                    return None
+        return None
+
+    def _suppress_tty_getty_once(self, cmd: list[str]) -> None:
+        if self.tty_suppressed:
+            return
+        if not bool(self.cfg.get("suppress_tty_getty", True)):
+            return
+        tty = self._infer_tty(cmd)
+        if tty is None:
+            return
+        service = f"getty@tty{tty}.service"
+        active = run_systemctl("is-active", service).returncode == 0
+        if not active:
+            self.tty_suppressed = True
+            return
+        p = run_systemctl("stop", service)
+        if p.returncode == 0:
+            self.tty_service = service
+            self.tty_restore_needed = True
+            self.tty_suppressed = True
+            print(f"[TTY] stopped {service} for quiet projection")
+            return
+        print(f"[TTY] failed to stop {service}: {p.stderr.strip()}")
+
+    def _restore_tty_getty(self) -> None:
+        if not self.tty_restore_needed or not self.tty_service:
+            return
+        p = run_systemctl("start", self.tty_service)
+        if p.returncode == 0:
+            print(f"[TTY] restored {self.tty_service}")
+        else:
+            print(f"[TTY] failed to restore {self.tty_service}: {p.stderr.strip()}")
+        self.tty_restore_needed = False
 
     def show(self, layer_idx: int) -> None:
         image = self.layer_images[layer_idx]
@@ -341,12 +397,13 @@ class ProjectorController:
 
         self.stop()
         cmd = self._build_cmd(image)
+        self._suppress_tty_getty_once(cmd)
         print(f"[Projector] show layer {layer_idx + 1}: {image}")
         self.proc = subprocess.Popen(
             cmd,
             env=self._env(),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             text=True,
             encoding="utf-8",
         )
@@ -374,6 +431,10 @@ class ProjectorController:
                 except Exception:
                     pass
         self.proc = None
+
+    def shutdown(self) -> None:
+        self.stop()
+        self._restore_tty_getty()
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -863,7 +924,7 @@ def run_flow(cfg: dict[str, Any], cfg_path: Path) -> None:
         except Exception:
             pass
         dlp.close()
-        projector.stop()
+        projector.shutdown()
 
 
 def main() -> None:

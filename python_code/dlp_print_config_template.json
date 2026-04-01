@@ -10,6 +10,7 @@
     "display": ":0",
     "xauthority": "/home/mfs/.Xauthority",
     "switch_settle_s": 0.25,
+    "suppress_tty_getty": true,
     "viewer_cmd_template": [
       "fbi",
       "-T",

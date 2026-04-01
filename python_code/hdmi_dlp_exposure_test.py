@@ -118,6 +118,37 @@ def check_hdmi_1080() -> tuple[bool, str]:
     return False, f"connected but no 1920x1080, modes={sorted(modes)}"
 
 
+def run_systemctl(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["systemctl", *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+
+def suppress_tty_getty(tty: int) -> tuple[str, bool]:
+    service = f"getty@tty{tty}.service"
+    active = run_systemctl("is-active", service).returncode == 0
+    if active:
+        p = run_systemctl("stop", service)
+        if p.returncode == 0:
+            print(f"[TTY] stopped {service} for quiet projection")
+            return service, True
+        print(f"[TTY] failed to stop {service}: {p.stderr.strip()}")
+    return service, False
+
+
+def restore_tty_getty(service: str, need_restore: bool) -> None:
+    if not need_restore:
+        return
+    p = run_systemctl("start", service)
+    if p.returncode == 0:
+        print(f"[TTY] restored {service}")
+    else:
+        print(f"[TTY] failed to restore {service}: {p.stderr.strip()}")
+
+
 def start_fbi(image_path: Path, tty: int, fbdev: str, settle_s: float) -> subprocess.Popen[str]:
     cmd = [
         "fbi",
@@ -126,10 +157,11 @@ def start_fbi(image_path: Path, tty: int, fbdev: str, settle_s: float) -> subpro
         "-d",
         fbdev,
         "-a",
+        "--noverbose",
         str(image_path),
     ]
     print("[HDMI] RUN:", " ".join(cmd))
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
     time.sleep(settle_s)
     return proc
 
@@ -177,15 +209,18 @@ def main() -> None:
 
     fbi_proc = None
     dlp = DLPController(args.port, args.baud, args.timeout)
+    tty_service = ""
+    tty_restore_needed = False
 
     try:
+        tty_service, tty_restore_needed = suppress_tty_getty(args.tty)
+
         # 1) 先投影图片
         fbi_proc = start_fbi(img, args.tty, args.fb, args.settle)
         if fbi_proc.poll() is not None:
             rc = fbi_proc.returncode
-            out, err = fbi_proc.communicate(timeout=1)
             if rc != 0:
-                raise RuntimeError(f"fbi 启动失败(code={rc})\nstdout:\n{out}\nstderr:\n{err}")
+                raise RuntimeError(f"fbi 启动失败(code={rc})")
             print("[HDMI] fbi exited with code 0 after rendering (accepted)")
 
         # 2) 再DLP握手/开引擎/设亮度
@@ -213,6 +248,7 @@ def main() -> None:
             pass
         dlp.close()
         stop_fbi(fbi_proc)
+        restore_tty_getty(tty_service, tty_restore_needed)
 
 
 if __name__ == "__main__":

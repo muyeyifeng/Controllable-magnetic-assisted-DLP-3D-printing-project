@@ -4,7 +4,7 @@
 
 import argparse
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from smbus2 import SMBus
 
@@ -14,8 +14,7 @@ TCA9548A_CH_DEFAULT = 0
 
 GPIO_PIN_DEFAULT = 27
 
-PCA9554_A_ADDR = 0x23
-PCA9554_B_ADDR = 0x27
+PCA9554_ADDR = 0x27
 MCP4725_ADDR = 0x60
 
 PCA9554_REG_OUTPUT = 0x01
@@ -86,9 +85,9 @@ class GPIOController:
             self.pi = None
 
 
-def _validate_io_levels(levels: List[int], name: str) -> None:
-    if len(levels) != 4:
-        raise ValueError(f"{name} 必须是长度为4的列表，对应 IO0~IO3")
+def _validate_io_levels(levels: List[int], name: str, width: int) -> None:
+    if len(levels) != width:
+        raise ValueError(f"{name} 必须是长度为{width}的列表")
     for i, v in enumerate(levels):
         if v not in (0, 1):
             raise ValueError(f"{name}[{i}] 只能是0或1，当前为 {v}")
@@ -120,8 +119,8 @@ def _tca_disable_all(bus: SMBus, mux_addr: int) -> None:
     time.sleep(0.01)
 
 
-def _set_pca9554_io03(bus: SMBus, addr: int, io_levels: List[int]) -> Dict[str, Any]:
-    _validate_io_levels(io_levels, f"PCA9554@0x{addr:02X}")
+def _set_pca9554_io07(bus: SMBus, addr: int, io_levels: List[int]) -> Dict[str, Any]:
+    _validate_io_levels(io_levels, f"PCA9554@0x{addr:02X}", 8)
 
     result: Dict[str, Any] = {
         "device": f"PCA9554@0x{addr:02X}",
@@ -135,27 +134,31 @@ def _set_pca9554_io03(bus: SMBus, addr: int, io_levels: List[int]) -> Dict[str, 
         cfg_old = bus.read_byte_data(addr, PCA9554_REG_CONFIG)
         out_old = bus.read_byte_data(addr, PCA9554_REG_OUTPUT)
 
-        cfg_new = cfg_old & 0xF0
+        # IO0~IO7 全部配置为输出。
+        cfg_new = 0x00
         bus.write_byte_data(addr, PCA9554_REG_CONFIG, cfg_new)
         cfg_readback = bus.read_byte_data(addr, PCA9554_REG_CONFIG)
         result["config_ok"] = (cfg_readback == cfg_new)
 
-        low_nibble = (
+        out_new = (
             ((io_levels[0] & 0x01) << 0)
             | ((io_levels[1] & 0x01) << 1)
             | ((io_levels[2] & 0x01) << 2)
             | ((io_levels[3] & 0x01) << 3)
+            | ((io_levels[4] & 0x01) << 4)
+            | ((io_levels[5] & 0x01) << 5)
+            | ((io_levels[6] & 0x01) << 6)
+            | ((io_levels[7] & 0x01) << 7)
         )
-        out_new = (out_old & 0xF0) | low_nibble
         bus.write_byte_data(addr, PCA9554_REG_OUTPUT, out_new)
         out_readback = bus.read_byte_data(addr, PCA9554_REG_OUTPUT)
-        result["output_ok"] = ((out_readback & 0x0F) == (out_new & 0x0F))
+        result["output_ok"] = (out_readback == out_new)
 
         result["verify_ok"] = result["config_ok"] and result["output_ok"]
         result["success"] = result["verify_ok"]
         result.update(
             {
-                "requested_io03": io_levels,
+                "requested_io07": io_levels,
                 "config_old": cfg_old,
                 "config_new": cfg_new,
                 "config_readback": cfg_readback,
@@ -235,7 +238,7 @@ def _best_effort_zero_dac(
 
 
 def execute_magnet_sequence(
-    io_23: List[int],
+    io_23: Optional[List[int]],
     io_27: List[int],
     dac_voltage: float,
     hold_seconds: float,
@@ -250,7 +253,7 @@ def execute_magnet_sequence(
     执行时序:
     1) GPIO27 拉低
     2) 选通 TCA9548A 指定通道
-    3) 设置 0x23 和 0x27 的 IO0~IO3
+    3) 设置 0x27 的 IO0~IO7
     4) 设置 0x60 DAC 到目标电压
     5) 保持 N 秒(0.1s 精度)
     6) 结束时 DAC 归零
@@ -259,8 +262,7 @@ def execute_magnet_sequence(
     安全策略:
     - 若中断/异常，仍会尝试 DAC=0V 且 GPIO27=高。
     """
-    _validate_io_levels(io_23, "io_23")
-    _validate_io_levels(io_27, "io_27")
+    resolved_io07 = resolve_io07_levels(io_23, io_27)
     _validate_voltage(dac_voltage, vref)
     hold_s = _validate_hold_seconds(hold_seconds)
 
@@ -273,8 +275,8 @@ def execute_magnet_sequence(
         "interrupted": False,
         "overall_success": False,
         "gpio_low_before_start": {"success": False},
-        "pca9554_0x23": {},
-        "pca9554_0x27": {},
+        "pca9554_0x27_io07": {},
+        "requested_io07": resolved_io07,
         "mcp4725_0x60_set": {},
         "mcp4725_0x60_zero_on_exit": {"success": False},
         "gpio_high_on_exit": {"success": False},
@@ -294,13 +296,11 @@ def execute_magnet_sequence(
                 _tca_select_channel(bus, tca_addr, tca_channel)
                 tca_selected = True
 
-                result["pca9554_0x23"] = _set_pca9554_io03(bus, PCA9554_A_ADDR, io_23)
-                result["pca9554_0x27"] = _set_pca9554_io03(bus, PCA9554_B_ADDR, io_27)
+                result["pca9554_0x27_io07"] = _set_pca9554_io07(bus, PCA9554_ADDR, resolved_io07)
                 result["mcp4725_0x60_set"] = _set_mcp4725_voltage(bus, MCP4725_ADDR, dac_voltage, vref)
 
                 if (
-                    result["pca9554_0x23"].get("success", False)
-                    and result["pca9554_0x27"].get("success", False)
+                    result["pca9554_0x27_io07"].get("success", False)
                     and result["mcp4725_0x60_set"].get("success", False)
                 ):
                     _hold_with_interrupt(hold_s)
@@ -343,8 +343,7 @@ def execute_magnet_sequence(
     result["overall_success"] = all(
         [
             result["gpio_low_before_start"].get("success", False),
-            result["pca9554_0x23"].get("success", False),
-            result["pca9554_0x27"].get("success", False),
+            result["pca9554_0x27_io07"].get("success", False),
             result["mcp4725_0x60_set"].get("success", False),
             result["mcp4725_0x60_zero_on_exit"].get("success", False),
             result["gpio_high_on_exit"].get("success", False),
@@ -357,14 +356,40 @@ def execute_magnet_sequence(
 
 def _parse_io_levels(text: str) -> List[int]:
     vals = [int(x.strip()) for x in text.split(",")]
-    _validate_io_levels(vals, "IO 参数")
+    if len(vals) not in (4, 8):
+        raise ValueError("IO 参数必须是4位或8位逗号列表")
+    _validate_io_levels(vals, "IO 参数", len(vals))
     return vals
 
 
+def resolve_io07_levels(io_23: Optional[List[int]], io_27: List[int]) -> List[int]:
+    # 新模式：--io27 直接给 8 位。
+    if len(io_27) == 8:
+        _validate_io_levels(io_27, "io_27", 8)
+        return io_27
+
+    # 兼容旧模式：--io23 与 --io27 各给 4 位，拼成 IO0~IO7。
+    _validate_io_levels(io_27, "io_27", 4)
+    if io_23 is None:
+        raise ValueError("当 --io27 为4位时，必须同时提供 --io23 的4位参数")
+    _validate_io_levels(io_23, "io_23", 4)
+    return list(io_23) + list(io_27)
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="GPIO27 + CH0下PCA9554 + MCP4725 顺序控制")
-    parser.add_argument("--io23", type=str, required=True, help="PCA9554@0x23 IO0~IO3，例如 1,0,1,0")
-    parser.add_argument("--io27", type=str, required=True, help="PCA9554@0x27 IO0~IO3，例如 0,0,1,1")
+    parser = argparse.ArgumentParser(description="GPIO27 + CH0下PCA9554(0x27, IO0~IO7) + MCP4725 顺序控制")
+    parser.add_argument(
+        "--io27",
+        type=str,
+        required=True,
+        help="PCA9554@0x27 IO设置。推荐8位：1,0,1,0,0,1,0,1；兼容4位(需配合--io23)",
+    )
+    parser.add_argument(
+        "--io23",
+        type=str,
+        required=False,
+        help="兼容旧参数：当--io27为4位时，提供旧的前4位(映射到IO0~IO3)",
+    )
     parser.add_argument("--dac", type=float, required=True, help="MCP4725 电压值，例如 2.5")
     parser.add_argument("--hold", type=float, required=True, help="保持秒数，支持0.1s精度，例如 1.2")
 
@@ -377,7 +402,7 @@ def main() -> None:
     args = parser.parse_args()
 
     ret = execute_magnet_sequence(
-        io_23=_parse_io_levels(args.io23),
+        io_23=_parse_io_levels(args.io23) if args.io23 else None,
         io_27=_parse_io_levels(args.io27),
         dac_voltage=args.dac,
         hold_seconds=args.hold,

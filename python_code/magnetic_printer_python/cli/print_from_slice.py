@@ -133,7 +133,7 @@ class ExposureConfig:
     useSliceIntensity: bool = False
     defaultIntensity: int = 120
     ignoreLedOffReject: bool = True
-    repeatDlpOnBeforeEachExposure: bool = True
+    repeatDlpOnBeforeEachExposure: bool = False
     logDlpCommands: bool = True
 
 
@@ -154,6 +154,8 @@ class PrintConfig:
     minExposureIntensity: int = 1
     maxExposureIntensity: int = 255
     interLayerDelaySeconds: float = 0.0
+    logMagneticSteps: bool = True
+    interruptReturnToTop: bool = True
     motion: MotionConfig = field(default_factory=MotionConfig)
     magnet: MagnetConfig = field(default_factory=MagnetConfig)
     exposure: ExposureConfig = field(default_factory=ExposureConfig)
@@ -545,7 +547,7 @@ class PrinterRuntime:
             self.fb = FramebufferNative(self.cfg.exposure.framebufferDevice)
         else:
             raise RuntimeError(f"unsupported imageLoader: {self.cfg.exposure.imageLoader}")
-        self._ensure_dlp_ready("prepare")
+        self._ensure_dlp_ready("startup")
 
     def move_um(self, distance_um: int, direction: str, reason: str = "") -> None:
         if distance_um <= 0:
@@ -603,10 +605,10 @@ class PrinterRuntime:
         self.prepare_motion()
         if self.home_pin is None:
             raise RuntimeError("homeTopPin is not configured; cannot home to top")
-        if pre_drop_um > 0:
-            self.move_um(pre_drop_um, MOVE_DIR_DOWN, reason="pre-home drop")
-
         stop = 1 if int(self.cfg.motion.homeStopLevel) else 0
+        # Only pre-drop when already on the top limit.
+        if pre_drop_um > 0 and self.home_pin.read() == stop:
+            self.move_um(pre_drop_um, MOVE_DIR_DOWN, reason="pre-home drop")
         chunk = max(1, int(self.cfg.motion.homeChunkSteps))
         max_steps = max(1, int(self.cfg.motion.homeMaxSteps))
         freq = max(1, int(self.cfg.motion.homeFrequencyHz))
@@ -653,12 +655,20 @@ class PrinterRuntime:
             return
         self.prepare_magnet()
         out = bits_to_output_byte(direction_bits)
+        hold_safe = max(0.0, float(hold_s))
+        if self.cfg.logMagneticSteps:
+            log(
+                f"magnet on: bits={direction_bits} out=0x{out:02x} "
+                f"v={float(voltage):.3f} hold={hold_safe:.3f}s"
+            )
+        if hold_safe <= 0 and self.cfg.logMagneticSteps:
+            log("magnet hold is 0s: pulse may be too short to observe during debug")
         self._set_magnet_gate(True)
         try:
             self._select_tca()
             self._write_pca9554(out)
             self._write_dac(voltage)
-            sleep_interruptible(self.stop_event, hold_s)
+            sleep_interruptible(self.stop_event, hold_safe)
         finally:
             try:
                 self._write_dac(0.0)
@@ -669,6 +679,19 @@ class PrinterRuntime:
             except Exception:
                 pass
             self._set_magnet_gate(False)
+            if self.cfg.logMagneticSteps:
+                log("magnet off")
+
+    def magnet_self_test(self, bits: str, voltage: float, hold_s: float, repeat: int, interval_s: float) -> None:
+        rep = max(1, int(repeat))
+        gap = max(0.0, float(interval_s))
+        for idx in range(rep):
+            if self.stop_event.is_set():
+                raise InterruptedError("Interrupted")
+            log(f"magnet-test {idx + 1}/{rep}")
+            self.apply_magnetic(bits, voltage, hold_s)
+            if idx + 1 < rep and gap > 0:
+                sleep_interruptible(self.stop_event, gap)
 
     def expose(self, image_path: str, intensity: int, seconds: float) -> None:
         if self.mock:
@@ -676,8 +699,6 @@ class PrinterRuntime:
             sleep_interruptible(self.stop_event, seconds)
             return
         self.prepare_exposure()
-        if self.cfg.exposure.repeatDlpOnBeforeEachExposure:
-            self._ensure_dlp_ready("per_exposure")
         log(f"exposure start: intensity={intensity} sec={seconds:.3f} image={image_path}")
         self.fb.render_image(image_path)
         self._set_brightness(intensity)
@@ -710,8 +731,6 @@ class PrinterRuntime:
         for idx in range(rep):
             if self.stop_event.is_set():
                 raise InterruptedError("Interrupted")
-            if self.cfg.exposure.repeatDlpOnBeforeEachExposure:
-                self._ensure_dlp_ready(f"dlp_test#{idx + 1}")
             if image_path:
                 self.fb.render_image(image_path)
             else:
@@ -731,7 +750,7 @@ class PrinterRuntime:
             if idx + 1 < rep and gap > 0:
                 sleep_interruptible(self.stop_event, gap)
 
-    def emergency_stop(self) -> None:
+    def emergency_stop(self, return_to_top: bool = False) -> None:
         log("emergency stop: stopping motion + magnetic + dlp")
         if self.step_pin:
             self._safe_call("step_pin low", lambda: self.step_pin.write(0))
@@ -746,15 +765,17 @@ class PrinterRuntime:
                 lambda: self._send_dlp(DLP_CMD_LED_OFF, "led_off", allow_reject=True, silent_reject=True),
             )
             self._safe_call("dlp off", lambda: self._send_dlp(DLP_CMD_OFF, "dlp_off", allow_reject=True))
+        if return_to_top and self.cfg.interruptReturnToTop:
+            self._safe_call("return to top after interrupt", self._safe_return_to_top_after_interrupt)
 
-    def request_emergency_stop(self, reason: str) -> None:
+    def request_emergency_stop(self, reason: str, return_to_top: bool = False) -> None:
         self.stop_event.set()
         with self._emergency_lock:
             if self._emergency_done:
                 return
             self._emergency_done = True
         log(f"safety stop requested: {reason}")
-        self.emergency_stop()
+        self.emergency_stop(return_to_top=return_to_top)
 
     def close(self) -> None:
         self.request_emergency_stop("runtime.close")
@@ -887,6 +908,62 @@ class PrinterRuntime:
         except Exception as exc:
             log(f"safety step failed ({label}): {exc}")
 
+    def _safe_return_to_top_after_interrupt(self) -> None:
+        if self.mock or not self.cfg.moveEnabled:
+            return
+        self.prepare_motion()
+        freq = max(1, int(self.cfg.motion.homeFrequencyHz))
+        pulse_us = max(10, int(self.cfg.motion.pulseWidthUs))
+        period = 1.0 / freq
+        high = pulse_us / 1_000_000.0
+        if high >= period:
+            raise RuntimeError("pulseWidthUs must be smaller than step period (interrupt return)")
+        low = period - high
+
+        self.dir_pin.write(self._direction_to_level(MOVE_DIR_UP))
+        self._set_motion_enable(True)
+        steps_done = 0
+        try:
+            stop = 1 if int(self.cfg.motion.homeStopLevel) else 0
+            # Prefer hardware top limit when available.
+            if self.home_pin is not None:
+                max_steps = max(1, int(self.cfg.motion.homeMaxSteps))
+                if self.home_pin.read() == stop:
+                    self.z_um = 0
+                    log("interrupt return: already at top limit")
+                    return
+                log(f"interrupt return: moving up to top limit @ {freq}Hz")
+                while steps_done < max_steps:
+                    self.step_pin.write(1)
+                    time.sleep(high)
+                    self.step_pin.write(0)
+                    time.sleep(low)
+                    steps_done += 1
+                    if self.home_pin.read() == stop:
+                        self.z_um = 0
+                        log(f"interrupt return: reached top limit, steps={steps_done}")
+                        return
+                log(f"interrupt return: top limit not reached within {max_steps} steps")
+                return
+
+            # Fallback without top limit: use tracked z height.
+            mm = max(0.0, self.z_um / 1000.0)
+            steps = int(round((mm * self.cfg.motion.stepsPerRev) / self.cfg.motion.leadMm))
+            if steps <= 0:
+                log("interrupt return: no home pin and z estimate is zero, skipped")
+                return
+            log(f"interrupt return: no home pin, moving up estimated {steps} steps @ {freq}Hz")
+            for _ in range(steps):
+                self.step_pin.write(1)
+                time.sleep(high)
+                self.step_pin.write(0)
+                time.sleep(low)
+                steps_done += 1
+            self.z_um = 0
+            log(f"interrupt return: estimated top move completed, steps={steps_done}")
+        finally:
+            self._set_motion_enable(False)
+
     def _set_brightness(self, intensity: int) -> None:
         if self.cfg.exposure.skipBrightnessCommand:
             return
@@ -972,6 +1049,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dlp-seconds", type=float, default=2.0, help="DLP test exposure seconds")
     p.add_argument("--dlp-repeat", type=int, default=1, help="DLP test repeat count")
     p.add_argument("--dlp-interval", type=float, default=0.5, help="DLP test interval seconds")
+    p.add_argument("--magnet-test", action="store_true", help="Run magnetic-only test and exit")
+    p.add_argument("--magnet-bits", default=X_POSITIVE_BITS, help="8-bit direction mask, e.g. 00001111")
+    p.add_argument("--magnet-voltage", type=float, default=1.0, help="Magnetic DAC voltage for test")
+    p.add_argument("--magnet-hold", type=float, default=1.0, help="Magnetic hold seconds for test")
+    p.add_argument("--magnet-repeat", type=int, default=1, help="Magnetic test repeat count")
+    p.add_argument("--magnet-interval", type=float, default=0.5, help="Magnetic test interval seconds")
     p.add_argument("--keep-extracted", action="store_true", help="Keep extracted temp files")
     p.add_argument("--mock", action="store_true", help="Force mock hardware mode")
     return p.parse_args()
@@ -1008,7 +1091,7 @@ def main() -> int:
     def on_signal(signum, frame):  # noqa: ANN001
         _ = frame
         signal_count["n"] += 1
-        runtime.request_emergency_stop(f"signal {signum}")
+        runtime.request_emergency_stop(f"signal {signum}", return_to_top=True)
         if signal_count["n"] >= 2:
             log("second interrupt received, forcing exit now")
             os._exit(130)
@@ -1038,9 +1121,25 @@ def main() -> int:
             )
             log("dlp-test completed")
             return 0
+        if args.magnet_test:
+            bits = str(args.magnet_bits).strip()
+            if len(bits) != 8 or any(ch not in "01" for ch in bits):
+                raise ValueError(f"invalid --magnet-bits: {bits}")
+            runtime.magnet_self_test(
+                bits=bits,
+                voltage=float(args.magnet_voltage),
+                hold_s=max(0.0, float(args.magnet_hold)),
+                repeat=max(1, int(args.magnet_repeat)),
+                interval_s=max(0.0, float(args.magnet_interval)),
+            )
+            log("magnet-test completed")
+            return 0
 
         if zip_path is None or not zip_path.exists():
             raise FileNotFoundError(f"zip not found: {zip_path}")
+        if cfg.exposureEnabled:
+            log("dlp preflight check: startup handshake/communication")
+            runtime.prepare_exposure()
         log(f"extracting zip: {zip_path}")
         extract_zip_safe(zip_path, tmp_dir)
         manifest_path = find_manifest_file(tmp_dir)
@@ -1114,6 +1213,8 @@ def main() -> int:
 
                 if cfg.magneticEnabled:
                     runtime.apply_magnetic(bits, strength, cfg.magneticHoldSeconds)
+                elif cfg.logMagneticSteps:
+                    log("magnet skipped: magneticEnabled=false")
 
                 if cfg.moveEnabled:
                     if rec_idx == 0:
@@ -1138,7 +1239,7 @@ def main() -> int:
         log("print interrupted by user")
         return 130
     except KeyboardInterrupt:
-        runtime.request_emergency_stop("KeyboardInterrupt")
+        runtime.request_emergency_stop("KeyboardInterrupt", return_to_top=True)
         log("print interrupted by keyboard")
         return 130
     finally:

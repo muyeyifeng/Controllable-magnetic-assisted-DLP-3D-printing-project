@@ -8,12 +8,14 @@
   "layerThicknessUmOverride": null,
   "finalReturnToTop": true,
   "magneticEnabled": true,
-  "magneticHoldSeconds": 0.0,
+  "magneticHoldSeconds": 10,
+  "logMagneticSteps": true,
   "exposureEnabled": true,
   "exposureSeconds": 1.0,
   "minExposureIntensity": 1,
   "maxExposureIntensity": 255,
   "interLayerDelaySeconds": 0.0,
+  "interruptReturnToTop": true,
   "motion": {
     "stepPin": 13,
     "dirPin": 5,
@@ -61,7 +63,7 @@
     "useSliceIntensity": false,
     "defaultIntensity": 120,
     "ignoreLedOffReject": true,
-    "repeatDlpOnBeforeEachExposure": true,
+    "repeatDlpOnBeforeEachExposure": false,
     "logDlpCommands": true
   }
 }

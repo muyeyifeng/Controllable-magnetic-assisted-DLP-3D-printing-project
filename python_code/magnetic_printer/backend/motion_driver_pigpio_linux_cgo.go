@@ -132,8 +132,9 @@ func (d *motionDriverPigpio) MoveExact(ctx context.Context, steps int, freqHz in
 	if wid < 0 {
 		return pigpioError("gpioWaveCreate", wid)
 	}
+	widU := C.uint(wid)
 	defer func() {
-		_ = C.gpioWaveDelete(wid)
+		_ = C.gpioWaveDelete(widU)
 	}()
 
 	remaining := steps
@@ -143,7 +144,7 @@ func (d *motionDriverPigpio) MoveExact(ctx context.Context, steps int, freqHz in
 			chunk = 65535
 		}
 		chain := []byte{
-			255, 0, byte(wid),
+			255, 0, byte(widU),
 			255, 1, byte(chunk & 0xFF), byte((chunk >> 8) & 0xFF),
 		}
 		rc := C.gpioWaveChain((*C.char)(unsafe.Pointer(&chain[0])), C.uint(len(chain)))

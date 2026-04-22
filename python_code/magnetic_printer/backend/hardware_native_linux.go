@@ -96,6 +96,8 @@ func (b *linuxHardwareBackend) Finish(ctx context.Context) error {
 
 type sysfsGPIOPin struct {
 	num       int
+	exportNum int
+	gpioPath  string
 	valueFile *os.File
 }
 
@@ -104,18 +106,35 @@ func newSysfsGPIOPin(num int) *sysfsGPIOPin {
 }
 
 func (p *sysfsGPIOPin) Prepare(direction string) error {
-	if p.num <= 0 {
+	if p.num < 0 {
 		return errors.New("invalid gpio pin")
 	}
 	gpioRoot := "/sys/class/gpio"
-	gpioPath := filepath.Join(gpioRoot, fmt.Sprintf("gpio%d", p.num))
+	exportNum := p.num
+	gpioPath := filepath.Join(gpioRoot, fmt.Sprintf("gpio%d", exportNum))
 	if _, err := os.Stat(gpioPath); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		if err := os.WriteFile(filepath.Join(gpioRoot, "export"), []byte(strconv.Itoa(p.num)), 0o644); err != nil {
-			already := strings.Contains(strings.ToLower(err.Error()), "busy")
-			if !already {
+		if err := os.WriteFile(filepath.Join(gpioRoot, "export"), []byte(strconv.Itoa(exportNum)), 0o644); err != nil {
+			if isGPIOBusyErr(err) {
+				// Already exported by another process.
+			} else if isGPIOInvalidArgErr(err) {
+				mapped, mapErr := resolveSysfsGPIOExportNumber(gpioRoot, p.num)
+				if mapErr != nil {
+					return fmt.Errorf("export gpio%d failed: %w (auto-remap failed: %v)", p.num, err, mapErr)
+				}
+				exportNum = mapped
+				gpioPath = filepath.Join(gpioRoot, fmt.Sprintf("gpio%d", exportNum))
+				if _, stErr := os.Stat(gpioPath); stErr != nil {
+					if !errors.Is(stErr, os.ErrNotExist) {
+						return stErr
+					}
+					if err2 := os.WriteFile(filepath.Join(gpioRoot, "export"), []byte(strconv.Itoa(exportNum)), 0o644); err2 != nil && !isGPIOBusyErr(err2) {
+						return fmt.Errorf("export gpio%d (mapped from bcm%d) failed: %w", exportNum, p.num, err2)
+					}
+				}
+			} else {
 				return fmt.Errorf("export gpio%d failed: %w", p.num, err)
 			}
 		}
@@ -139,8 +158,10 @@ func (p *sysfsGPIOPin) Prepare(direction string) error {
 
 	f, err := os.OpenFile(filepath.Join(gpioPath, "value"), os.O_RDWR, 0)
 	if err != nil {
-		return fmt.Errorf("open gpio%d value failed: %w", p.num, err)
+		return fmt.Errorf("open gpio%d value failed: %w", exportNum, err)
 	}
+	p.exportNum = exportNum
+	p.gpioPath = gpioPath
 	p.valueFile = f
 	return nil
 }
@@ -179,6 +200,70 @@ func (p *sysfsGPIOPin) Close() error {
 		return err
 	}
 	return nil
+}
+
+func isGPIOBusyErr(err error) bool {
+	return strings.Contains(strings.ToLower(err.Error()), "busy")
+}
+
+func isGPIOInvalidArgErr(err error) bool {
+	return strings.Contains(strings.ToLower(err.Error()), "invalid argument")
+}
+
+func resolveSysfsGPIOExportNumber(gpioRoot string, bcm int) (int, error) {
+	chips, err := filepath.Glob(filepath.Join(gpioRoot, "gpiochip*"))
+	if err != nil {
+		return 0, err
+	}
+	if len(chips) == 0 {
+		return 0, errors.New("no gpiochip found in /sys/class/gpio")
+	}
+	type cand struct {
+		exportNum int
+		score     int
+	}
+	candidates := make([]cand, 0, len(chips))
+	for _, chip := range chips {
+		base, err1 := readIntFromFile(filepath.Join(chip, "base"))
+		ngpio, err2 := readIntFromFile(filepath.Join(chip, "ngpio"))
+		if err1 != nil || err2 != nil || ngpio <= 0 {
+			continue
+		}
+		if bcm < 0 || bcm >= ngpio {
+			continue
+		}
+		labelBytes, _ := os.ReadFile(filepath.Join(chip, "label"))
+		label := strings.ToLower(strings.TrimSpace(string(labelBytes)))
+		score := 0
+		if strings.Contains(label, "bcm") || strings.Contains(label, "pinctrl") {
+			score += 10
+		}
+		if strings.Contains(label, "raspberry") {
+			score += 5
+		}
+		candidates = append(candidates, cand{
+			exportNum: base + bcm,
+			score:     score,
+		})
+	}
+	if len(candidates) == 0 {
+		return 0, fmt.Errorf("cannot map bcm gpio %d to global sysfs number", bcm)
+	}
+	best := candidates[0]
+	for _, c := range candidates[1:] {
+		if c.score > best.score {
+			best = c
+		}
+	}
+	return best.exportNum, nil
+}
+
+func readIntFromFile(path string) (int, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(strings.TrimSpace(string(b)))
 }
 
 type i2cNative struct {

@@ -98,9 +98,14 @@ class MotionConfig:
     enablePin: int = 8
     enableLow: bool = False
     moveFrequencyHz: int = 100
+    homeFrequencyHz: int = 1600
     pulseWidthUs: int = 1000
     stepsPerRev: int = 3200
     leadMm: float = 4.0
+    homeTopPin: int = 20
+    homeStopLevel: int = 0
+    homeChunkSteps: int = 200
+    homeMaxSteps: int = 300000
 
 
 @dataclass
@@ -121,6 +126,8 @@ class PrintConfig:
     useMockHardware: bool = False
     moveEnabled: bool = True
     bottomDistanceUm: int = 221600
+    preHomeEnabled: bool = True
+    preHomeDropUm: int = 3000
     peelDistanceUm: int = 3000
     layerThicknessUmOverride: Optional[int] = None
     finalReturnToTop: bool = True
@@ -177,6 +184,13 @@ class SysfsGPIOPin:
         if self.value_file:
             self.value_file.close()
             self.value_file = None
+
+    def read(self) -> int:
+        if self.value_file is None:
+            raise RuntimeError("gpio not prepared")
+        self.value_file.seek(0)
+        c = self.value_file.read(1)
+        return 1 if c == "1" else 0
 
 
 def resolve_sysfs_gpio_export_number(gpio_root: Path, bcm: int) -> int:
@@ -328,6 +342,7 @@ class PrinterRuntime:
         self.dir_pin = None
         self.en_pin = None
         self.mag_en_pin = None
+        self.home_pin = None
         self.i2c = None
         self.serial = None
         self.fb = None
@@ -343,6 +358,9 @@ class PrinterRuntime:
         self.step_pin.prepare("out")
         self.dir_pin.prepare("out")
         self.en_pin.prepare("out")
+        if self.cfg.motion.homeTopPin > 0:
+            self.home_pin = SysfsGPIOPin(self.cfg.motion.homeTopPin)
+            self.home_pin.prepare("in")
         self.step_pin.write(0)
         self._set_motion_enable(False)
 
@@ -411,6 +429,59 @@ class PrinterRuntime:
                 self.z_um += distance_um
             else:
                 self.z_um = max(0, self.z_um - distance_um)
+        finally:
+            self._set_motion_enable(False)
+
+    def home_to_top(self, pre_drop_um: int) -> None:
+        if self.mock:
+            log(f"[MOCK] pre-home drop {pre_drop_um}um then home to top")
+            if pre_drop_um > 0:
+                self.move_um(pre_drop_um, MOVE_DIR_DOWN, reason="pre-home drop")
+            self.z_um = 0
+            return
+        self.prepare_motion()
+        if self.home_pin is None:
+            raise RuntimeError("homeTopPin is not configured; cannot home to top")
+        if pre_drop_um > 0:
+            self.move_um(pre_drop_um, MOVE_DIR_DOWN, reason="pre-home drop")
+
+        stop = 1 if int(self.cfg.motion.homeStopLevel) else 0
+        chunk = max(1, int(self.cfg.motion.homeChunkSteps))
+        max_steps = max(1, int(self.cfg.motion.homeMaxSteps))
+        freq = max(1, int(self.cfg.motion.homeFrequencyHz))
+        pulse_us = max(10, int(self.cfg.motion.pulseWidthUs))
+        period = 1.0 / freq
+        high = pulse_us / 1_000_000.0
+        if high >= period:
+            raise RuntimeError("pulseWidthUs must be smaller than step period (home)")
+        low = period - high
+
+        dir_level = self._direction_to_level(MOVE_DIR_UP)
+        self.dir_pin.write(dir_level)
+        self._set_motion_enable(True)
+        total = 0
+        try:
+            while total < max_steps:
+                if self.stop_event.is_set():
+                    raise InterruptedError("Interrupted")
+                if self.home_pin.read() == stop:
+                    log(f"home reached top limit, steps={total}")
+                    self.z_um = 0
+                    return
+                run = min(chunk, max_steps - total)
+                for _ in range(run):
+                    if self.stop_event.is_set():
+                        raise InterruptedError("Interrupted")
+                    self.step_pin.write(1)
+                    time.sleep(high)
+                    self.step_pin.write(0)
+                    time.sleep(low)
+                    total += 1
+                    if self.home_pin.read() == stop:
+                        log(f"home reached top limit, steps={total}")
+                        self.z_um = 0
+                        return
+            raise RuntimeError(f"home failed: reached max steps ({max_steps})")
         finally:
             self._set_motion_enable(False)
 
@@ -483,7 +554,7 @@ class PrinterRuntime:
 
     def close(self) -> None:
         self.emergency_stop()
-        for pin in [self.step_pin, self.dir_pin, self.en_pin, self.mag_en_pin]:
+        for pin in [self.step_pin, self.dir_pin, self.en_pin, self.mag_en_pin, self.home_pin]:
             try:
                 if pin:
                     pin.close()
@@ -707,6 +778,9 @@ def main() -> int:
             layer = int(rec.get("layer", -1))
             layer_groups.setdefault(layer, []).append(rec)
         ordered_layers = sorted(layer_groups.keys())
+
+        if cfg.moveEnabled and cfg.preHomeEnabled:
+            runtime.home_to_top(max(0, int(cfg.preHomeDropUm)))
 
         if cfg.moveEnabled and cfg.bottomDistanceUm > 0:
             runtime.move_um(cfg.bottomDistanceUm, MOVE_DIR_DOWN, reason="to bottom")

@@ -62,6 +62,8 @@ python ../cli/print_from_slice.py \
 
 - `Ctrl+C` 会触发安全停机：停运动 + 清磁场 + 关 DLP。
 - 关键参数（`cli_config.json`）：
+  - `preHomeEnabled`: 打印前先执行回顶端归零流程
+  - `preHomeDropUm`: 回零前先下降一小段，避免已压住上限位
   - `bottomDistanceUm`: 首次下降到底部距离（默认 `221600`）
   - `peelDistanceUm`: 层间抬升/回压距离（默认 `3000`）
   - `finalReturnToTop`: 打印完成后自动回顶端

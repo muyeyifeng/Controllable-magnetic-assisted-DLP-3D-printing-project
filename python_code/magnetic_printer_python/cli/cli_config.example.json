@@ -1,6 +1,8 @@
 {
   "useMockHardware": false,
   "moveEnabled": true,
+  "preHomeEnabled": true,
+  "preHomeDropUm": 3000,
   "bottomDistanceUm": 221600,
   "peelDistanceUm": 3000,
   "layerThicknessUmOverride": null,
@@ -18,10 +20,15 @@
     "dirHighIsUp": true,
     "enablePin": 8,
     "enableLow": false,
-    "moveFrequencyHz": 100,
-    "pulseWidthUs": 1000,
+    "moveFrequencyHz": 1600,
+    "homeFrequencyHz": 1600,
+    "pulseWidthUs": 20,
     "stepsPerRev": 3200,
-    "leadMm": 4.0
+    "leadMm": 4.0,
+    "homeTopPin": 20,
+    "homeStopLevel": 0,
+    "homeChunkSteps": 200,
+    "homeMaxSteps": 300000
   },
   "magnet": {
     "enableGpioPin": 27,

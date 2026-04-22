@@ -37,6 +37,31 @@ python main.py
 
 启动后访问 `http://localhost:5241/index.html`。
 
+## 纯命令行打印脚本（调试推荐）
+
+如果你不想走前后端，可直接用 CLI：
+
+1. 复制配置：
+
+```bash
+cd python_code/magnetic_printer_python/cli
+cp cli_config.example.json cli_config.json
+```
+
+2. 运行：
+
+```bash
+cd python_code/magnetic_printer_python/backend
+source .venv/bin/activate
+python ../cli/print_from_slice.py \
+  --zip ../../slice_example.zip \
+  --config ../cli/cli_config.json
+```
+
+3. 中断：
+
+- `Ctrl+C` 会触发安全停机：停运动 + 清磁场 + 关 DLP。
+
 ## 说明
 
 - 默认 Windows 下会自动走 Mock 硬件。

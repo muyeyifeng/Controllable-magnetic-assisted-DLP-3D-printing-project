@@ -1,0 +1,44 @@
+{
+  "useMockHardware": false,
+  "moveEnabled": true,
+  "skipFirstMove": true,
+  "magneticEnabled": true,
+  "magneticHoldSeconds": 0.0,
+  "exposureEnabled": true,
+  "exposureSeconds": 1.0,
+  "minExposureIntensity": 1,
+  "maxExposureIntensity": 255,
+  "interLayerDelaySeconds": 0.0,
+  "motion": {
+    "stepPin": 13,
+    "dirPin": 5,
+    "enablePin": 8,
+    "enableLow": false,
+    "moveFrequencyHz": 100,
+    "pulseWidthUs": 1000,
+    "stepsPerRev": 3200,
+    "leadMm": 4.0,
+    "defaultDirection": "down"
+  },
+  "magnet": {
+    "enableGpioPin": 27,
+    "enableActiveLow": null,
+    "i2cBus": 1,
+    "tcaAddress": 112,
+    "tcaChannel": 0,
+    "pca9554Address": 39,
+    "mcp4725Address": 96,
+    "dacVRef": 5.0
+  },
+  "exposure": {
+    "serialPort": "/dev/ttyUSB0",
+    "baudRate": 115200,
+    "readTimeoutMs": 1000,
+    "responseReadBytes": 10,
+    "framebufferDevice": "/dev/fb0",
+    "framebufferSettleMs": 250,
+    "skipBrightnessCommand": true,
+    "minimumIntensity": 10,
+    "ignoreLedOffReject": true
+  }
+}

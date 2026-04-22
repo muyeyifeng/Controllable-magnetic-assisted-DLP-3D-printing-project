@@ -17,11 +17,9 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -66,17 +64,51 @@ type AppConfig struct {
 	Hardware     HardwareConfig `json:"hardware"`
 }
 
+type MagnetNativeConfig struct {
+	EnableGPIOPin  int     `json:"enableGpioPin"`
+	I2CBus         int     `json:"i2cBus"`
+	TCAAddress     int     `json:"tcaAddress"`
+	TCAChannel     int     `json:"tcaChannel"`
+	PCA9554Address int     `json:"pca9554Address"`
+	MCP4725Address int     `json:"mcp4725Address"`
+	DACVRef        float64 `json:"dacVRef"`
+}
+
+type MotionNativeConfig struct {
+	StepPin       int     `json:"stepPin"`
+	DirPin        int     `json:"dirPin"`
+	EnablePin     int     `json:"enablePin"`
+	EnableLow     bool    `json:"enableLow"`
+	FrequencyHz   int     `json:"frequencyHz"`
+	MoveFrequency int     `json:"moveFrequencyHz"`
+	HomeFrequency int     `json:"homeFrequencyHz"`
+	PulseWidthUS  int     `json:"pulseWidthUs"`
+	StepsPerRev   int     `json:"stepsPerRev"`
+	LeadMM        float64 `json:"leadMm"`
+	HomeTopPin    int     `json:"homeTopPin"`
+	HomeStopLevel int     `json:"homeStopLevel"`
+	HomeDirection string  `json:"homeDirection"`
+	HomeMaxSteps  int     `json:"homeMaxSteps"`
+	HomeChunkStep int     `json:"homeChunkSteps"`
+	HomeReport    int     `json:"homeReportEvery"`
+}
+
+type ExposureNativeConfig struct {
+	SerialPort         string `json:"serialPort"`
+	BaudRate           int    `json:"baudRate"`
+	ReadTimeoutMS      int    `json:"readTimeoutMs"`
+	ResponseReadBytes  int    `json:"responseReadBytes"`
+	FramebufferDevice  string `json:"framebufferDevice"`
+	FramebufferSettleM int    `json:"framebufferSettleMs"`
+}
+
 type HardwareConfig struct {
-	UseMockHardware          bool     `json:"useMockHardware"`
-	SkipWaitInMock           bool     `json:"skipWaitInMock"`
-	ScriptsRoot              string   `json:"scriptsRoot"`
-	CommandTimeoutSeconds    int      `json:"commandTimeoutSeconds"`
-	MagnetCommandTemplate    []string `json:"magnetCommandTemplate"`
-	ExposureCommandTemp      []string `json:"exposureCommandTemplate"`
-	LayerMoveCommandTemp     []string `json:"layerMoveCommandTemplate"`
-	LayerMoveDownCommandTemp []string `json:"layerMoveDownCommandTemplate"`
-	LayerMoveUpCommandTemp   []string `json:"layerMoveUpCommandTemplate"`
-	HomeCommandTemp          []string `json:"homeCommandTemplate"`
+	UseMockHardware       bool                 `json:"useMockHardware"`
+	SkipWaitInMock        bool                 `json:"skipWaitInMock"`
+	CommandTimeoutSeconds int                  `json:"commandTimeoutSeconds"`
+	Magnet                MagnetNativeConfig   `json:"magnet"`
+	Motion                MotionNativeConfig   `json:"motion"`
+	Exposure              ExposureNativeConfig `json:"exposure"`
 }
 
 func defaultConfig() AppConfig {
@@ -88,44 +120,42 @@ func defaultConfig() AppConfig {
 		Hardware: HardwareConfig{
 			UseMockHardware:       runtime.GOOS == "windows",
 			SkipWaitInMock:        true,
-			ScriptsRoot:           filepath.Join("..", ".."),
 			CommandTimeoutSeconds: 120,
-			MagnetCommandTemplate: []string{
-				"python3",
-				"{scripts_root}/tca_ch0_io_dac.py",
-				"--io27",
-				"{io27_csv}",
-				"--dac",
-				"{magnetic_voltage}",
-				"--hold",
-				"{magnetic_hold_s}",
+			Magnet: MagnetNativeConfig{
+				EnableGPIOPin:  27,
+				I2CBus:         1,
+				TCAAddress:     0x70,
+				TCAChannel:     0,
+				PCA9554Address: 0x27,
+				MCP4725Address: 0x60,
+				DACVRef:        5.0,
 			},
-			ExposureCommandTemp: []string{
-				"python3",
-				"{scripts_root}/hdmi_dlp_exposure_test.py",
-				"--image",
-				"{image_path}",
-				"--exposure",
-				"{exposure_s}",
-				"--brightness",
-				"{exposure_intensity}",
-				"--port",
-				"/dev/ttyUSB0",
-				"--baud",
-				"115200",
-				"--timeout",
-				"1.0",
-				"--tty",
-				"1",
-				"--fb",
-				"/dev/fb0",
-				"--settle",
-				"0.25",
+			Motion: MotionNativeConfig{
+				StepPin:       13,
+				DirPin:        5,
+				EnablePin:     8,
+				EnableLow:     false,
+				FrequencyHz:   800,
+				MoveFrequency: 800,
+				HomeFrequency: 1600,
+				PulseWidthUS:  20,
+				StepsPerRev:   3200,
+				LeadMM:        4.0,
+				HomeTopPin:    21,
+				HomeStopLevel: 1,
+				HomeDirection: moveDirUp,
+				HomeMaxSteps:  0,
+				HomeChunkStep: 200,
+				HomeReport:    1000,
 			},
-			LayerMoveCommandTemp:     []string{},
-			LayerMoveDownCommandTemp: []string{},
-			LayerMoveUpCommandTemp:   []string{},
-			HomeCommandTemp:          []string{},
+			Exposure: ExposureNativeConfig{
+				SerialPort:         "/dev/ttyUSB0",
+				BaudRate:           115200,
+				ReadTimeoutMS:      1000,
+				ResponseReadBytes:  10,
+				FramebufferDevice:  "/dev/fb0",
+				FramebufferSettleM: 250,
+			},
 		},
 	}
 }
@@ -152,12 +182,96 @@ func loadConfig(baseDir string) (AppConfig, error) {
 	if cfg.Hardware.CommandTimeoutSeconds <= 0 {
 		cfg.Hardware.CommandTimeoutSeconds = 120
 	}
+	normalizeHardwareConfig(&cfg.Hardware)
 
 	cfg.DataRoot = resolvePath(baseDir, cfg.DataRoot)
 	cfg.FrontendRoot = resolvePath(baseDir, cfg.FrontendRoot)
-	cfg.Hardware.ScriptsRoot = resolvePath(baseDir, cfg.Hardware.ScriptsRoot)
 
 	return cfg, nil
+}
+
+func normalizeHardwareConfig(cfg *HardwareConfig) {
+	if cfg == nil {
+		return
+	}
+	if cfg.Magnet.EnableGPIOPin <= 0 {
+		cfg.Magnet.EnableGPIOPin = 27
+	}
+	if cfg.Magnet.I2CBus < 0 {
+		cfg.Magnet.I2CBus = 1
+	}
+	if cfg.Magnet.TCAAddress <= 0 {
+		cfg.Magnet.TCAAddress = 0x70
+	}
+	if cfg.Magnet.PCA9554Address <= 0 {
+		cfg.Magnet.PCA9554Address = 0x27
+	}
+	if cfg.Magnet.MCP4725Address <= 0 {
+		cfg.Magnet.MCP4725Address = 0x60
+	}
+	if cfg.Magnet.DACVRef <= 0 {
+		cfg.Magnet.DACVRef = 5.0
+	}
+	if cfg.Motion.StepPin <= 0 {
+		cfg.Motion.StepPin = 13
+	}
+	if cfg.Motion.DirPin <= 0 {
+		cfg.Motion.DirPin = 5
+	}
+	if cfg.Motion.EnablePin <= 0 {
+		cfg.Motion.EnablePin = 8
+	}
+	if cfg.Motion.FrequencyHz <= 0 {
+		cfg.Motion.FrequencyHz = 800
+	}
+	if cfg.Motion.MoveFrequency <= 0 {
+		cfg.Motion.MoveFrequency = cfg.Motion.FrequencyHz
+	}
+	if cfg.Motion.HomeFrequency <= 0 {
+		cfg.Motion.HomeFrequency = cfg.Motion.FrequencyHz
+	}
+	if cfg.Motion.PulseWidthUS <= 0 {
+		cfg.Motion.PulseWidthUS = 20
+	}
+	if cfg.Motion.StepsPerRev <= 0 {
+		cfg.Motion.StepsPerRev = 3200
+	}
+	if cfg.Motion.LeadMM <= 0 {
+		cfg.Motion.LeadMM = 4.0
+	}
+	if cfg.Motion.HomeTopPin <= 0 {
+		cfg.Motion.HomeTopPin = 21
+	}
+	if cfg.Motion.HomeStopLevel != 0 && cfg.Motion.HomeStopLevel != 1 {
+		cfg.Motion.HomeStopLevel = 1
+	}
+	if strings.TrimSpace(cfg.Motion.HomeDirection) == "" {
+		cfg.Motion.HomeDirection = moveDirUp
+	}
+	if cfg.Motion.HomeChunkStep <= 0 {
+		cfg.Motion.HomeChunkStep = 200
+	}
+	if cfg.Motion.HomeReport <= 0 {
+		cfg.Motion.HomeReport = 1000
+	}
+	if strings.TrimSpace(cfg.Exposure.SerialPort) == "" {
+		cfg.Exposure.SerialPort = "/dev/ttyUSB0"
+	}
+	if cfg.Exposure.BaudRate <= 0 {
+		cfg.Exposure.BaudRate = 115200
+	}
+	if cfg.Exposure.ReadTimeoutMS <= 0 {
+		cfg.Exposure.ReadTimeoutMS = 1000
+	}
+	if cfg.Exposure.ResponseReadBytes <= 0 {
+		cfg.Exposure.ResponseReadBytes = 10
+	}
+	if strings.TrimSpace(cfg.Exposure.FramebufferDevice) == "" {
+		cfg.Exposure.FramebufferDevice = "/dev/fb0"
+	}
+	if cfg.Exposure.FramebufferSettleM < 0 {
+		cfg.Exposure.FramebufferSettleM = 250
+	}
 }
 
 func resolvePath(baseDir, p string) string {
@@ -2326,8 +2440,19 @@ func directionBitsToCSV(bits string) (string, error) {
 }
 
 type hardwareController struct {
-	cfg    HardwareConfig
-	logger *log.Logger
+	cfg     HardwareConfig
+	logger  *log.Logger
+	mu      sync.Mutex
+	backend hardwareBackend
+}
+
+type hardwareBackend interface {
+	Prepare(ctx context.Context) error
+	MoveLayer(ctx context.Context, layer LayerPlanItem) error
+	Home(ctx context.Context) error
+	ApplyMagneticField(ctx context.Context, layer LayerPlanItem) error
+	ExposeLayer(ctx context.Context, layer LayerPlanItem) error
+	Finish(ctx context.Context) error
 }
 
 func newHardwareController(cfg HardwareConfig, logger *log.Logger) *hardwareController {
@@ -2341,8 +2466,13 @@ func (h *hardwareController) isMock() bool {
 func (h *hardwareController) Prepare(ctx context.Context) error {
 	if h.isMock() {
 		h.logger.Println("mock hardware prepare")
+		return nil
 	}
-	return nil
+	backend, err := h.ensureBackend()
+	if err != nil {
+		return err
+	}
+	return backend.Prepare(ctx)
 }
 
 func (h *hardwareController) MoveLayer(ctx context.Context, layer LayerPlanItem) error {
@@ -2354,29 +2484,12 @@ func (h *hardwareController) MoveLayer(ctx context.Context, layer LayerPlanItem)
 		h.logger.Printf("mock move layer=%d direction=%s thickness_mm=%.4f", layer.LayerIndex, moveDirection, layer.LayerThicknessMM)
 		return nil
 	}
-	var commandTemplate []string
-	switch moveDirection {
-	case moveDirUp:
-		if len(h.cfg.LayerMoveUpCommandTemp) > 0 {
-			commandTemplate = h.cfg.LayerMoveUpCommandTemp
-		}
-	default:
-		if len(h.cfg.LayerMoveDownCommandTemp) > 0 {
-			commandTemplate = h.cfg.LayerMoveDownCommandTemp
-		}
-	}
-	if len(commandTemplate) == 0 {
-		commandTemplate = h.cfg.LayerMoveCommandTemp
-	}
-	if len(commandTemplate) == 0 {
-		return nil
-	}
 	layer.MoveDirection = moveDirection
-	params, err := buildTemplateParams(h.cfg.ScriptsRoot, layer)
+	backend, err := h.ensureBackend()
 	if err != nil {
 		return err
 	}
-	return h.runCommandTemplate(ctx, commandTemplate, params)
+	return backend.MoveLayer(ctx, layer)
 }
 
 func (h *hardwareController) Home(ctx context.Context) error {
@@ -2384,11 +2497,11 @@ func (h *hardwareController) Home(ctx context.Context) error {
 		h.logger.Println("mock home")
 		return nil
 	}
-	if len(h.cfg.HomeCommandTemp) == 0 {
-		return nil
+	backend, err := h.ensureBackend()
+	if err != nil {
+		return err
 	}
-	params := buildBaseTemplateParams(h.cfg.ScriptsRoot)
-	return h.runCommandTemplate(ctx, h.cfg.HomeCommandTemp, params)
+	return backend.Home(ctx)
 }
 
 func (h *hardwareController) ApplyMagneticField(ctx context.Context, layer LayerPlanItem) error {
@@ -2399,17 +2512,11 @@ func (h *hardwareController) ApplyMagneticField(ctx context.Context, layer Layer
 		}
 		return nil
 	}
-	if len(h.cfg.MagnetCommandTemplate) == 0 {
-		if layer.MagneticHoldS > 0 {
-			return sleepCtx(ctx, time.Duration(layer.MagneticHoldS*float64(time.Second)))
-		}
-		return nil
-	}
-	params, err := buildTemplateParams(h.cfg.ScriptsRoot, layer)
+	backend, err := h.ensureBackend()
 	if err != nil {
 		return err
 	}
-	return h.runCommandTemplate(ctx, h.cfg.MagnetCommandTemplate, params)
+	return backend.ApplyMagneticField(ctx, layer)
 }
 
 func (h *hardwareController) ExposeLayer(ctx context.Context, layer LayerPlanItem) error {
@@ -2420,100 +2527,37 @@ func (h *hardwareController) ExposeLayer(ctx context.Context, layer LayerPlanIte
 		}
 		return nil
 	}
-	if len(h.cfg.ExposureCommandTemp) == 0 {
-		if layer.ExposureS > 0 {
-			return sleepCtx(ctx, time.Duration(layer.ExposureS*float64(time.Second)))
-		}
-		return nil
-	}
-	params, err := buildTemplateParams(h.cfg.ScriptsRoot, layer)
+	backend, err := h.ensureBackend()
 	if err != nil {
 		return err
 	}
-	return h.runCommandTemplate(ctx, h.cfg.ExposureCommandTemp, params)
+	return backend.ExposeLayer(ctx, layer)
 }
 
 func (h *hardwareController) Finish(ctx context.Context) error {
 	if h.isMock() {
 		h.logger.Println("mock hardware finish")
-	}
-	return nil
-}
-
-func buildTemplateParams(scriptsRoot string, layer LayerPlanItem) (map[string]string, error) {
-	bits := normalizeDirectionBits(layer.DirectionBits)
-	if err := validateDirectionBits(bits); err != nil {
-		return nil, err
-	}
-	io27CSV, err := directionBitsToCSV(bits)
-	if err != nil {
-		return nil, err
-	}
-	moveDirection, err := normalizeMoveDirection(layer.MoveDirection)
-	if err != nil {
-		return nil, err
-	}
-	params := buildBaseTemplateParams(scriptsRoot)
-	params["layer_mm"] = formatFloat(layer.LayerThicknessMM)
-	params["layer_um"] = formatFloat(layer.LayerThicknessMM * 1000.0)
-	params["io27_bits"] = bits
-	params["io27_csv"] = io27CSV
-	params["magnetic_voltage"] = formatFloat(layer.MagneticVoltage)
-	params["magnetic_hold_s"] = formatFloat(layer.MagneticHoldS)
-	params["exposure_intensity"] = strconv.Itoa(layer.ExposureIntensity)
-	params["exposure_s"] = formatFloat(layer.ExposureS)
-	params["image_path"] = layer.ImagePath
-	params["move_direction"] = moveDirection
-	return params, nil
-}
-
-func buildBaseTemplateParams(scriptsRoot string) map[string]string {
-	return map[string]string{
-		"scripts_root":       scriptsRoot,
-		"layer_mm":           "0",
-		"layer_um":           "0",
-		"io27_bits":          xPositiveBits,
-		"io27_csv":           "0,0,0,0,1,1,1,1",
-		"magnetic_voltage":   "0",
-		"magnetic_hold_s":    "0",
-		"exposure_intensity": "0",
-		"exposure_s":         "0",
-		"image_path":         "",
-		"move_direction":     moveDirDown,
-	}
-}
-
-func formatFloat(v float64) string {
-	return strconv.FormatFloat(v, 'f', -1, 64)
-}
-
-func (h *hardwareController) runCommandTemplate(ctx context.Context, template []string, params map[string]string) error {
-	if len(template) == 0 {
 		return nil
 	}
-	cmdParts := make([]string, len(template))
-	for i, part := range template {
-		value := part
-		for k, v := range params {
-			value = strings.ReplaceAll(value, "{"+k+"}", v)
-		}
-		cmdParts[i] = value
-	}
-	executable := cmdParts[0]
-	args := cmdParts[1:]
-	timeout := time.Duration(h.cfg.CommandTimeoutSeconds) * time.Second
-	if timeout <= 0 {
-		timeout = 120 * time.Second
-	}
-	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	cmd := exec.CommandContext(cmdCtx, executable, args...)
-	output, err := cmd.CombinedOutput()
-	h.logger.Printf("hardware command: %s %s", executable, strings.Join(args, " "))
+	backend, err := h.ensureBackend()
 	if err != nil {
-		return fmt.Errorf("command failed: %w; output=%s", err, strings.TrimSpace(string(output)))
+		return err
 	}
-	return nil
+	return backend.Finish(ctx)
+}
+
+func (h *hardwareController) ensureBackend() (hardwareBackend, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.backend != nil {
+		return h.backend, nil
+	}
+	backend, err := newNativeHardwareBackend(h.cfg, h.logger)
+	if err != nil {
+		return nil, err
+	}
+	h.backend = backend
+	return h.backend, nil
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) error {

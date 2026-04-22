@@ -4,8 +4,8 @@
   "frontendRoot": "../frontend",
   "adminUsers": ["admin"],
   "hardware": {
-    "useMockHardware": true,
-    "skipWaitInMock": true,
+    "useMockHardware": false,
+    "skipWaitInMock": false,
     "commandTimeoutSeconds": 120,
     "magnet": {
       "enableGpioPin": 27,

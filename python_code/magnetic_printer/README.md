@@ -58,20 +58,23 @@ High-stability web controller for magnetic-assisted DLP printing.
 ## Deploy On Raspberry Pi
 
 1. Copy `backend/config.example.json` to `backend/config.json`.
+   - If you use the same wiring as existing Python scripts, start from `backend/config.rpi2.sample.json`.
 2. Set:
    - `hardware.useMockHardware = false`
    - `hardware.skipWaitInMock = false`
-   - `hardware.scriptsRoot` to your script directory.
-3. Edit command templates if needed:
-   - `magnetCommandTemplate`
-   - `exposureCommandTemplate`
-   - optional `layerMoveCommandTemplate` (legacy generic move)
-   - optional `layerMoveDownCommandTemplate` (preferred for down move)
-   - optional `layerMoveUpCommandTemplate` (preferred for up move)
-   - optional `homeCommandTemplate` (axis homing)
-4. Build on dev machine for Raspberry Pi 2:
+3. Configure native hardware modules (pure Go, no Python exec):
+   - `hardware.magnet` (TCA9548A + PCA9554 + MCP4725 + GPIO gate)
+   - `hardware.motion` (pigpio C API wave chain; exact pulse count control with top limit switch)
+   - `hardware.exposure` (DLP serial + framebuffer image render)
+4. Install pigpio development library on Pi (for motion module):
+   - `sudo apt-get install pigpio libpigpio-dev`
+5. Build on Raspberry Pi (recommended for pigpio C API):
+   - `cd magnetic_printer/backend`
+   - `CGO_ENABLED=1 go build -o magnetic-printer-backend`
+6. Optional cross-build from dev machine (CGO disabled):
    - `GOOS=linux GOARCH=arm GOARM=7 go build -o magnetic-printer-backend`
-5. Run on Pi:
+   - note: this build can run, but motion module will reject execution and ask for `CGO_ENABLED=1`.
+7. Run on Pi:
    - `./magnetic-printer-backend`
 
 ## Notes

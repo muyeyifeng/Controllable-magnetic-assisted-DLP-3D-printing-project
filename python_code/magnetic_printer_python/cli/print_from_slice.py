@@ -507,6 +507,11 @@ class PrinterRuntime:
         self.z_um = 0
         self._emergency_lock = threading.Lock()
         self._emergency_done = False
+        self._mag_lock = threading.Lock()
+        self._mag_timer: Optional[threading.Timer] = None
+        self._mag_active = False
+        self._mag_bits = ""
+        self._mag_voltage = 0.0
 
     def prepare_motion(self) -> None:
         if self.mock or self.step_pin is not None:
@@ -657,38 +662,94 @@ class PrinterRuntime:
             self._set_motion_enable(False)
 
     def apply_magnetic(self, direction_bits: str, voltage: float, hold_s: float) -> None:
+        # Blocking helper used by magnet-test path.
+        self.start_magnetic(direction_bits, voltage, hold_s)
+        hold_safe = max(0.0, float(hold_s))
+        if hold_safe > 0:
+            sleep_interruptible(self.stop_event, hold_safe)
+        self.stop_magnetic("blocking hold finished")
+
+    def start_magnetic(self, direction_bits: str, voltage: float, hold_s: float) -> None:
         if self.mock:
             log(f"[MOCK] magnet bits={direction_bits} v={voltage:.3f} hold={hold_s:.3f}s")
-            sleep_interruptible(self.stop_event, hold_s)
             return
         self.prepare_magnet()
         out = bits_to_output_byte(direction_bits)
         hold_safe = max(0.0, float(hold_s))
+        with self._mag_lock:
+            self._stop_magnetic_locked("restart", force=True)
+            self._set_magnet_gate(True)
+            try:
+                self._select_tca()
+                self._write_pca9554(out)
+                self._write_dac(voltage)
+            except Exception:
+                try:
+                    self._write_dac(0.0)
+                except Exception:
+                    pass
+                try:
+                    self._disable_tca()
+                except Exception:
+                    pass
+                self._set_magnet_gate(False)
+                raise
+            self._mag_active = True
+            self._mag_bits = direction_bits
+            self._mag_voltage = float(voltage)
+            if hold_safe > 0:
+                self._mag_timer = threading.Timer(hold_safe, self._on_magnet_hold_timeout)
+                self._mag_timer.daemon = True
+                self._mag_timer.start()
+            else:
+                self._mag_timer = None
         if self.cfg.logMagneticSteps:
-            log(
-                f"magnet on: bits={direction_bits} out=0x{out:02x} "
-                f"v={float(voltage):.3f} hold={hold_safe:.3f}s"
-            )
-        if hold_safe <= 0 and self.cfg.logMagneticSteps:
-            log("magnet hold is 0s: pulse may be too short to observe during debug")
-        self._set_magnet_gate(True)
+            if hold_safe > 0:
+                log(
+                    f"magnet on: bits={direction_bits} out=0x{out:02x} "
+                    f"v={float(voltage):.3f} hold={hold_safe:.3f}s (async)"
+                )
+            else:
+                log(
+                    f"magnet on: bits={direction_bits} out=0x{out:02x} "
+                    f"v={float(voltage):.3f} hold=until exposure end (async)"
+                )
+
+    def stop_magnetic(self, reason: str = "", force: bool = False) -> None:
+        if self.mock:
+            return
+        with self._mag_lock:
+            self._stop_magnetic_locked(reason, force=force)
+
+    def _on_magnet_hold_timeout(self) -> None:
         try:
-            self._select_tca()
-            self._write_pca9554(out)
-            self._write_dac(voltage)
-            sleep_interruptible(self.stop_event, hold_safe)
-        finally:
-            try:
-                self._write_dac(0.0)
-            except Exception:
-                pass
-            try:
-                self._disable_tca()
-            except Exception:
-                pass
-            self._set_magnet_gate(False)
-            if self.cfg.logMagneticSteps:
-                log("magnet off")
+            self.stop_magnetic("hold timeout")
+        except Exception as exc:
+            log(f"magnet timeout stop failed: {exc}")
+
+    def _stop_magnetic_locked(self, reason: str, force: bool) -> None:
+        t = self._mag_timer
+        self._mag_timer = None
+        if t is not None:
+            t.cancel()
+        if not self._mag_active and not force:
+            return
+        try:
+            self._write_dac(0.0)
+        except Exception:
+            pass
+        try:
+            self._disable_tca()
+        except Exception:
+            pass
+        self._set_magnet_gate(False)
+        was_active = self._mag_active
+        self._mag_active = False
+        self._mag_bits = ""
+        self._mag_voltage = 0.0
+        if self.cfg.logMagneticSteps and (was_active or force):
+            extra = f" ({reason})" if reason else ""
+            log(f"magnet off{extra}")
 
     def magnet_self_test(self, bits: str, voltage: float, hold_s: float, repeat: int, interval_s: float) -> None:
         rep = max(1, int(repeat))
@@ -763,10 +824,7 @@ class PrinterRuntime:
         if self.step_pin:
             self._safe_call("step_pin low", lambda: self.step_pin.write(0))
         self._safe_call("motion disable", lambda: self._set_motion_enable(False))
-        if self.i2c:
-            self._safe_call("dac zero", lambda: self._write_dac(0.0))
-            self._safe_call("tca disable", self._disable_tca)
-        self._safe_call("magnet gate off", lambda: self._set_magnet_gate(False))
+        self._safe_call("magnet stop", lambda: self.stop_magnetic("emergency stop", force=True))
         if self.serial:
             self._safe_call(
                 "dlp led_off",
@@ -1225,21 +1283,28 @@ def main() -> int:
                 if rec_idx > 0 and cfg.moveEnabled and peel_um > 0:
                     runtime.move_um(peel_um, MOVE_DIR_UP, reason=f"same-layer({layer_no}) re-lift #{rec_idx}")
 
-                if cfg.magneticEnabled:
-                    runtime.apply_magnetic(bits, strength, cfg.magneticHoldSeconds)
-                elif cfg.logMagneticSteps:
-                    log("magnet skipped: magneticEnabled=false")
+                magnet_started = False
+                try:
+                    if cfg.magneticEnabled:
+                        runtime.start_magnetic(bits, strength, cfg.magneticHoldSeconds)
+                        magnet_started = True
+                    elif cfg.logMagneticSteps:
+                        log("magnet skipped: magneticEnabled=false")
 
-                if cfg.moveEnabled:
-                    if rec_idx == 0:
-                        down_um = max(0, peel_um - layer_thickness_um)
-                    else:
-                        down_um = peel_um
-                    if down_um > 0:
-                        runtime.move_um(down_um, MOVE_DIR_DOWN, reason=f"press for layer {layer_no} rec#{rec_idx}")
+                    if cfg.moveEnabled:
+                        if rec_idx == 0:
+                            down_um = max(0, peel_um - layer_thickness_um)
+                        else:
+                            down_um = peel_um
+                        if down_um > 0:
+                            runtime.move_um(down_um, MOVE_DIR_DOWN, reason=f"press for layer {layer_no} rec#{rec_idx}")
 
-                if cfg.exposureEnabled:
-                    runtime.expose(str(img), intensity, cfg.exposureSeconds)
+                    if cfg.exposureEnabled:
+                        runtime.expose(str(img), intensity, cfg.exposureSeconds)
+                finally:
+                    # Stop magnet when exposure ends; if hold timeout happened first this is a no-op.
+                    if magnet_started and cfg.exposureEnabled:
+                        runtime.stop_magnetic("exposure finished")
 
             if cfg.interLayerDelaySeconds > 0:
                 sleep_interruptible(stop_event, cfg.interLayerDelaySeconds)

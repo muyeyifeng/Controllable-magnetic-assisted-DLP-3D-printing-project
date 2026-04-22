@@ -47,8 +47,14 @@
     "responseReadBytes": 10,
     "framebufferDevice": "/dev/fb0",
     "framebufferSettleMs": 250,
-    "skipBrightnessCommand": true,
+    "dlpOnSettleMs": 500,
+    "sendFanOnCommand": true,
+    "ignoreFanReject": true,
+    "skipBrightnessCommand": false,
+    "ignoreBrightnessReject": true,
     "minimumIntensity": 10,
+    "useSliceIntensity": false,
+    "defaultIntensity": 120,
     "ignoreLedOffReject": true
   }
 }

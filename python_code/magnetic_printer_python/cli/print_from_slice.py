@@ -38,6 +38,7 @@ Y_NEGATIVE_BITS = "00111100"
 DLP_CMD_HANDSHAKE = bytes([0xA6, 0x01, 0x05])
 DLP_CMD_ON = bytes([0xA6, 0x02, 0x02, 0x01])
 DLP_CMD_OFF = bytes([0xA6, 0x02, 0x02, 0x00])
+DLP_CMD_FAN_ON = bytes([0xA6, 0x02, 0x04, 0x03])
 DLP_CMD_LED_ON = bytes([0xA6, 0x02, 0x03, 0x01])
 DLP_CMD_LED_OFF = bytes([0xA6, 0x02, 0x03, 0x00])
 
@@ -116,8 +117,14 @@ class ExposureConfig:
     responseReadBytes: int = 10
     framebufferDevice: str = "/dev/fb0"
     framebufferSettleMs: int = 250
-    skipBrightnessCommand: bool = True
+    dlpOnSettleMs: int = 500
+    sendFanOnCommand: bool = True
+    ignoreFanReject: bool = True
+    skipBrightnessCommand: bool = False
+    ignoreBrightnessReject: bool = True
     minimumIntensity: int = 10
+    useSliceIntensity: bool = False
+    defaultIntensity: int = 120
     ignoreLedOffReject: bool = True
 
 
@@ -384,7 +391,22 @@ class PrinterRuntime:
         self.fb = FramebufferNative(self.cfg.exposure.framebufferDevice)
         self._send_dlp(DLP_CMD_HANDSHAKE, "handshake")
         self._send_dlp(DLP_CMD_ON, "dlp_on")
-        self._send_dlp(DLP_CMD_LED_OFF, "led_off", allow_reject=self.cfg.exposure.ignoreLedOffReject)
+        settle_s = max(0.0, self.cfg.exposure.dlpOnSettleMs / 1000.0)
+        if settle_s > 0:
+            sleep_interruptible(self.stop_event, settle_s)
+        if self.cfg.exposure.sendFanOnCommand:
+            self._send_dlp(
+                DLP_CMD_FAN_ON,
+                "fan_on",
+                allow_reject=self.cfg.exposure.ignoreFanReject,
+                silent_reject=self.cfg.exposure.ignoreFanReject,
+            )
+        self._send_dlp(
+            DLP_CMD_LED_OFF,
+            "led_off",
+            allow_reject=self.cfg.exposure.ignoreLedOffReject,
+            silent_reject=self.cfg.exposure.ignoreLedOffReject,
+        )
 
     def move_um(self, distance_um: int, direction: str, reason: str = "") -> None:
         if distance_um <= 0:
@@ -522,7 +544,12 @@ class PrinterRuntime:
         try:
             sleep_interruptible(self.stop_event, seconds)
         finally:
-            self._send_dlp(DLP_CMD_LED_OFF, "led_off", allow_reject=self.cfg.exposure.ignoreLedOffReject)
+            self._send_dlp(
+                DLP_CMD_LED_OFF,
+                "led_off",
+                allow_reject=self.cfg.exposure.ignoreLedOffReject,
+                silent_reject=self.cfg.exposure.ignoreLedOffReject,
+            )
 
     def emergency_stop(self) -> None:
         log("emergency stop: stopping motion + magnetic + dlp")
@@ -547,7 +574,7 @@ class PrinterRuntime:
             pass
         try:
             if self.serial:
-                self._send_dlp(DLP_CMD_LED_OFF, "led_off", allow_reject=True)
+                self._send_dlp(DLP_CMD_LED_OFF, "led_off", allow_reject=True, silent_reject=True)
                 self._send_dlp(DLP_CMD_OFF, "dlp_off", allow_reject=True)
         except Exception:
             pass
@@ -641,13 +668,14 @@ class PrinterRuntime:
         low = (code & 0x0F) << 4
         self.i2c.write(self.cfg.magnet.mcp4725Address, bytes([0x40, high, low]))
 
-    def _send_dlp(self, cmd: bytes, desc: str, allow_reject: bool = False) -> None:
+    def _send_dlp(self, cmd: bytes, desc: str, allow_reject: bool = False, silent_reject: bool = False) -> None:
         resp = self.serial.send(cmd, max(1, self.cfg.exposure.responseReadBytes))
         if len(resp) == 0:
             raise RuntimeError(f"{desc} timeout")
         if resp[-1] == 0xE0:
             if allow_reject:
-                log(f"{desc} rejected but ignored: {resp.hex(' ')}")
+                if not silent_reject:
+                    log(f"{desc} rejected but ignored: {resp.hex(' ')}")
                 return
             raise RuntimeError(f"{desc} rejected by dlp, response={resp.hex(' ')}")
 
@@ -658,7 +686,11 @@ class PrinterRuntime:
         floor = max(0, min(255, int(self.cfg.exposure.minimumIntensity)))
         if 0 < val < floor:
             val = floor
-        self._send_dlp(bytes([0xA6, 0x02, 0x10, val]), f"brightness_{val}")
+        self._send_dlp(
+            bytes([0xA6, 0x02, 0x10, val]),
+            f"brightness_{val}",
+            allow_reject=bool(self.cfg.exposure.ignoreBrightnessReject),
+        )
 
 
 def extract_zip_safe(zip_path: Path, dst_root: Path) -> None:
@@ -691,7 +723,23 @@ def load_config(path: Path) -> PrintConfig:
     if not path.exists():
         return cfg
     raw = json.loads(path.read_text(encoding="utf-8"))
-    for k in ["useMockHardware", "moveEnabled", "skipFirstMove", "magneticEnabled", "magneticHoldSeconds", "exposureEnabled", "exposureSeconds", "minExposureIntensity", "maxExposureIntensity", "interLayerDelaySeconds"]:
+    for k in [
+        "useMockHardware",
+        "moveEnabled",
+        "bottomDistanceUm",
+        "preHomeEnabled",
+        "preHomeDropUm",
+        "peelDistanceUm",
+        "layerThicknessUmOverride",
+        "finalReturnToTop",
+        "magneticEnabled",
+        "magneticHoldSeconds",
+        "exposureEnabled",
+        "exposureSeconds",
+        "minExposureIntensity",
+        "maxExposureIntensity",
+        "interLayerDelaySeconds",
+    ]:
         if k in raw:
             setattr(cfg, k, raw[k])
     if "motion" in raw:
@@ -807,7 +855,10 @@ def main() -> int:
                 y = float(field.get("y") or 0.0)
                 bits = resolve_direction_bits(x, y)
                 strength = resolve_strength(rec)
-                intensity = int(rec.get("light_intensity") or cfg.minExposureIntensity)
+                if cfg.exposure.useSliceIntensity:
+                    intensity = int(rec.get("light_intensity") or cfg.exposure.defaultIntensity)
+                else:
+                    intensity = int(cfg.exposure.defaultIntensity)
                 intensity = max(cfg.minExposureIntensity, min(cfg.maxExposureIntensity, intensity))
                 rel_file = str(rec.get("file") or "").strip()
                 if not rel_file:

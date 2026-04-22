@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "updated_at_epoch_s": 1775027406.2122097,
+  "status": "interrupted",
+  "config_path": "/home/mfs/python_code/dlp_print_config_test_10to50um.json",
+  "total_layers": 100,
+  "completed_layers": 0,
+  "completed_thickness_um": 0.0,
+  "next_layer": 1,
+  "max_travel_um": 221600.0
+}

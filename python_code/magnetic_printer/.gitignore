@@ -1,0 +1,11 @@
+backend/runtime_data/
+backend/config.json
+backend/*.exe
+backend/*.exe~
+backend/backend
+backend/magnetic-printer-backend
+backend/magnetic_printer_backend
+backend/magnetic_printer_backend.exe
+backend/magnetic_printer_backend.exe~
+backend/go_run.out.log
+backend/go_run.err.log

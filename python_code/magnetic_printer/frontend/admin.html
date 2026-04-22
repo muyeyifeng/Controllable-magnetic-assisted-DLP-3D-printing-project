@@ -1,0 +1,108 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>流程编排 | 磁辅 DLP 打印系统</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="container">
+    <h1>流程编排控制台</h1>
+    <p class="hint">所有登录用户可使用图形化流程编排。管理员可额外使用手动调试组件。</p>
+
+    <section class="card">
+      <h2>当前身份</h2>
+      <div class="row">
+        <p id="auth-info">-</p>
+        <button id="back-btn" type="button">返回主控制台</button>
+      </div>
+    </section>
+
+    <section id="manual-section" class="card">
+      <h2>手动控制组件</h2>
+      <div class="grid">
+        <div class="step-card">
+          <h3>磁场组件</h3>
+          <label>方向 bits (8位)
+            <input id="manual-magnet-bits" value="00001111">
+          </label>
+          <label>DAC 电压(V)
+            <input id="manual-magnet-voltage" type="number" step="0.01" value="1.0">
+          </label>
+          <label>保持时间(s)
+            <input id="manual-magnet-hold" type="number" step="0.1" value="1.0">
+          </label>
+          <button id="manual-magnet-run" type="button">执行磁场</button>
+        </div>
+
+        <div class="step-card">
+          <h3>曝光组件</h3>
+          <label>图片路径
+            <input id="manual-exposure-image" placeholder="/abs/path/image.png">
+          </label>
+          <label>曝光强度(0-255)
+            <input id="manual-exposure-intensity" type="number" min="0" max="255" value="80">
+          </label>
+          <label>曝光时间(s)
+            <input id="manual-exposure-seconds" type="number" step="0.1" value="1.0">
+          </label>
+          <button id="manual-exposure-run" type="button">执行曝光</button>
+        </div>
+
+        <div class="step-card">
+          <h3>位移组件</h3>
+          <label>下移(mm)
+            <input id="manual-move-down-thickness" type="number" step="0.001" value="0.05">
+          </label>
+          <button id="manual-move-down-run" type="button">执行下移</button>
+          <label>上移(mm)
+            <input id="manual-move-up-thickness" type="number" step="0.001" value="0.05">
+          </label>
+          <button id="manual-move-up-run" type="button">执行上移</button>
+          <button id="manual-home-run" type="button">执行归零</button>
+        </div>
+
+        <div class="step-card">
+          <h3>等待组件</h3>
+          <label>等待时间(s)
+            <input id="manual-wait-seconds" type="number" step="0.1" value="1.0">
+          </label>
+          <button id="manual-wait-run" type="button">执行等待</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>图形化流程编排</h2>
+      <div class="row">
+        <label>程序名称
+          <input id="program-name" value="admin-flow">
+        </label>
+        <button id="add-root-step-btn" type="button">新增根步骤</button>
+        <button id="run-program-btn" type="button">运行流程</button>
+        <button id="cancel-program-btn" type="button">停止流程</button>
+      </div>
+      <div class="row">
+        <button id="export-config-btn" type="button">导出加密配置</button>
+        <input id="import-config-file" type="file" accept=".mpcfg,application/octet-stream">
+        <button id="import-config-btn" type="button">导入配置</button>
+      </div>
+
+      <div id="step-root"></div>
+    </section>
+
+    <section class="card">
+      <h2>流程状态</h2>
+      <p id="program-status">-</p>
+      <pre id="program-events"></pre>
+    </section>
+
+    <section class="card">
+      <h2>消息</h2>
+      <pre id="messages"></pre>
+    </section>
+  </main>
+  <script src="./admin.js"></script>
+</body>
+</html>

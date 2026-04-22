@@ -1,0 +1,73 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>控制台 | 磁辅 DLP 打印系统</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="container">
+    <h1>磁辅 DLP 打印控制台</h1>
+    <p class="hint">方向编码: X+ = <code>00001111</code>, Y+ = <code>11000011</code>, X- = <code>11110000</code>, Y- = <code>00111100</code></p>
+
+    <section class="card">
+      <h2>当前登录</h2>
+      <div class="row">
+        <p id="auth-info">-</p>
+        <button id="admin-btn" type="button" style="display:none">流程编排</button>
+        <button id="logout-btn" type="button">注销</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>设备状态</h2>
+      <p id="device-status">-</p>
+      <p id="job-status">-</p>
+      <pre id="job-events"></pre>
+    </section>
+
+    <section class="card">
+      <h2>上传切片包</h2>
+      <div class="row">
+        <input id="package-file" type="file" accept=".zip">
+        <button id="upload-btn" type="button">上传 ZIP</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>开始打印</h2>
+      <div class="grid">
+        <label>切片包
+          <select id="package-select"></select>
+        </label>
+        <label>覆写层厚(mm，留空按 manifest)
+          <input id="override-thickness" type="number" step="0.001">
+        </label>
+        <label>覆写磁场强度 DAC 电压(V，留空按 manifest)
+          <input id="override-magnetic" type="number" step="0.01">
+        </label>
+        <label>覆写曝光强度(0-255，留空按 manifest)
+          <input id="override-intensity" type="number" min="0" max="255">
+        </label>
+        <label>全局磁场保持时间(s)
+          <input id="global-hold" type="number" step="0.1" value="0">
+        </label>
+        <label>全局曝光时间(s)
+          <input id="global-exposure" type="number" step="0.1" value="0">
+        </label>
+      </div>
+      <div class="row">
+        <button id="start-btn" type="button">开始打印</button>
+        <button id="cancel-btn" type="button">取消打印</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>消息</h2>
+      <pre id="messages"></pre>
+    </section>
+  </main>
+  <script src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,48 @@
+{
+  "listenAddr": ":5241",
+  "dataRoot": "runtime_data",
+  "frontendRoot": "../frontend",
+  "adminUsers": ["admin"],
+  "hardware": {
+    "useMockHardware": true,
+    "skipWaitInMock": true,
+    "scriptsRoot": "../..",
+    "commandTimeoutSeconds": 120,
+    "magnetCommandTemplate": [
+      "python3",
+      "{scripts_root}/tca_ch0_io_dac.py",
+      "--io27",
+      "{io27_csv}",
+      "--dac",
+      "{magnetic_voltage}",
+      "--hold",
+      "{magnetic_hold_s}"
+    ],
+    "exposureCommandTemplate": [
+      "python3",
+      "{scripts_root}/hdmi_dlp_exposure_test.py",
+      "--image",
+      "{image_path}",
+      "--exposure",
+      "{exposure_s}",
+      "--brightness",
+      "{exposure_intensity}",
+      "--port",
+      "/dev/ttyUSB0",
+      "--baud",
+      "115200",
+      "--timeout",
+      "1.0",
+      "--tty",
+      "1",
+      "--fb",
+      "/dev/fb0",
+      "--settle",
+      "0.25"
+    ],
+    "layerMoveCommandTemplate": [],
+    "layerMoveDownCommandTemplate": [],
+    "layerMoveUpCommandTemplate": [],
+    "homeCommandTemplate": []
+  }
+}

@@ -1,7 +1,10 @@
 {
   "useMockHardware": false,
   "moveEnabled": true,
-  "skipFirstMove": true,
+  "bottomDistanceUm": 221600,
+  "peelDistanceUm": 3000,
+  "layerThicknessUmOverride": null,
+  "finalReturnToTop": true,
   "magneticEnabled": true,
   "magneticHoldSeconds": 0.0,
   "exposureEnabled": true,
@@ -12,13 +15,13 @@
   "motion": {
     "stepPin": 13,
     "dirPin": 5,
+    "dirHighIsUp": true,
     "enablePin": 8,
     "enableLow": false,
     "moveFrequencyHz": 100,
     "pulseWidthUs": 1000,
     "stepsPerRev": 3200,
-    "leadMm": 4.0,
-    "defaultDirection": "down"
+    "leadMm": 4.0
   },
   "magnet": {
     "enableGpioPin": 27,

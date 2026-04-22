@@ -61,6 +61,10 @@ python ../cli/print_from_slice.py \
 3. 中断：
 
 - `Ctrl+C` 会触发安全停机：停运动 + 清磁场 + 关 DLP。
+- 关键参数（`cli_config.json`）：
+  - `bottomDistanceUm`: 首次下降到底部距离（默认 `221600`）
+  - `peelDistanceUm`: 层间抬升/回压距离（默认 `3000`）
+  - `finalReturnToTop`: 打印完成后自动回顶端
 
 ## 说明
 

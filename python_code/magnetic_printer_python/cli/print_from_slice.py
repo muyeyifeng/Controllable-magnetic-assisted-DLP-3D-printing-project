@@ -94,13 +94,13 @@ class MagnetConfig:
 class MotionConfig:
     stepPin: int = 13
     dirPin: int = 5
+    dirHighIsUp: bool = True
     enablePin: int = 8
     enableLow: bool = False
     moveFrequencyHz: int = 100
     pulseWidthUs: int = 1000
     stepsPerRev: int = 3200
     leadMm: float = 4.0
-    defaultDirection: str = MOVE_DIR_DOWN
 
 
 @dataclass
@@ -120,7 +120,10 @@ class ExposureConfig:
 class PrintConfig:
     useMockHardware: bool = False
     moveEnabled: bool = True
-    skipFirstMove: bool = True
+    bottomDistanceUm: int = 221600
+    peelDistanceUm: int = 3000
+    layerThicknessUmOverride: Optional[int] = None
+    finalReturnToTop: bool = True
     magneticEnabled: bool = True
     magneticHoldSeconds: float = 0.0
     exposureEnabled: bool = True
@@ -329,6 +332,7 @@ class PrinterRuntime:
         self.serial = None
         self.fb = None
         self.mag_active_low = None
+        self.z_um = 0
 
     def prepare_motion(self) -> None:
         if self.mock or self.step_pin is not None:
@@ -364,22 +368,28 @@ class PrinterRuntime:
         self._send_dlp(DLP_CMD_ON, "dlp_on")
         self._send_dlp(DLP_CMD_LED_OFF, "led_off", allow_reject=self.cfg.exposure.ignoreLedOffReject)
 
-    def move_down_mm(self, mm: float) -> None:
-        if mm <= 0:
+    def move_um(self, distance_um: int, direction: str, reason: str = "") -> None:
+        if distance_um <= 0:
             return
+        mm = distance_um / 1000.0
+        direction = direction.strip().lower()
+        if direction not in {MOVE_DIR_DOWN, MOVE_DIR_UP}:
+            raise ValueError("direction must be up/down")
         if self.mock:
-            log(f"[MOCK] move {mm:.4f} mm")
+            log(f"[MOCK] move {direction} {distance_um}um ({mm:.4f}mm) {reason}".strip())
             sleep_interruptible(self.stop_event, 0.05)
+            if direction == MOVE_DIR_DOWN:
+                self.z_um += distance_um
+            else:
+                self.z_um = max(0, self.z_um - distance_um)
             return
         self.prepare_motion()
         steps = int(round((mm * self.cfg.motion.stepsPerRev) / self.cfg.motion.leadMm))
         if steps <= 0:
-            log(f"move {mm:.4f} mm -> 0 step, skipped")
+            log(f"move {direction} {distance_um}um ({mm:.4f}mm) -> 0 step, skipped")
             return
-        direction = self.cfg.motion.defaultDirection.strip().lower() or MOVE_DIR_DOWN
-        if direction not in {MOVE_DIR_DOWN, MOVE_DIR_UP}:
-            direction = MOVE_DIR_DOWN
-        self.dir_pin.write(1 if direction == MOVE_DIR_UP else 0)
+        dir_level = self._direction_to_level(direction)
+        self.dir_pin.write(dir_level)
         self._set_motion_enable(True)
         try:
             freq = max(1, int(self.cfg.motion.moveFrequencyHz))
@@ -389,7 +399,7 @@ class PrinterRuntime:
             if high >= period:
                 raise RuntimeError("pulseWidthUs must be smaller than step period")
             low = period - high
-            log(f"move {mm:.4f} mm -> {steps} steps @ {freq}Hz")
+            log(f"move {direction} {distance_um}um ({mm:.4f}mm) -> {steps} steps @ {freq}Hz {reason}".strip())
             for _ in range(steps):
                 if self.stop_event.is_set():
                     raise InterruptedError("Interrupted")
@@ -397,6 +407,10 @@ class PrinterRuntime:
                 time.sleep(high)
                 self.step_pin.write(0)
                 time.sleep(low)
+            if direction == MOVE_DIR_DOWN:
+                self.z_um += distance_um
+            else:
+                self.z_um = max(0, self.z_um - distance_um)
         finally:
             self._set_motion_enable(False)
 
@@ -521,6 +535,11 @@ class PrinterRuntime:
             return
         level_on = 0 if self.cfg.motion.enableLow else 1
         self.en_pin.write(level_on if enable else 1 - level_on)
+
+    def _direction_to_level(self, direction: str) -> int:
+        up_level = 1 if self.cfg.motion.dirHighIsUp else 0
+        down_level = 1 - up_level
+        return up_level if direction == MOVE_DIR_UP else down_level
 
     def _set_magnet_gate(self, on: bool) -> None:
         if self.mag_en_pin is None:
@@ -668,43 +687,83 @@ def main() -> int:
         manifest_path = find_manifest_file(tmp_dir)
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         records = manifest.get("records", []) or []
-        records.sort(key=lambda r: int(r.get("layer", 0)))
+        records.sort(key=lambda r: (int(r.get("layer", 0)), str(r.get("file", ""))))
 
         if not records:
             raise RuntimeError("manifest has no records")
 
-        layer_thickness = float(manifest.get("layer_thickness_mm") or 0.05)
+        manifest_layer_thickness_um = int(round(float(manifest.get("layer_thickness_mm") or 0.05) * 1000.0))
+        layer_thickness_um = cfg.layerThicknessUmOverride if cfg.layerThicknessUmOverride is not None else manifest_layer_thickness_um
+        if layer_thickness_um <= 0:
+            raise RuntimeError("layer thickness must be > 0")
+
         end_layer = args.end_layer if args.end_layer >= 0 else max(int(r.get("layer", 0)) for r in records)
         selected = [r for r in records if args.start_layer <= int(r.get("layer", 0)) <= end_layer]
         log(f"records total={len(records)} selected={len(selected)} layers={args.start_layer}..{end_layer}")
 
-        for i, rec in enumerate(selected, start=1):
+        # group records by layer to support multi-exposure in the same layer
+        layer_groups: dict[int, list[dict]] = {}
+        for rec in selected:
+            layer = int(rec.get("layer", -1))
+            layer_groups.setdefault(layer, []).append(rec)
+        ordered_layers = sorted(layer_groups.keys())
+
+        if cfg.moveEnabled and cfg.bottomDistanceUm > 0:
+            runtime.move_um(cfg.bottomDistanceUm, MOVE_DIR_DOWN, reason="to bottom")
+
+        peel_um = max(0, int(cfg.peelDistanceUm))
+        for layer_idx, layer_no in enumerate(ordered_layers, start=1):
             if stop_event.is_set():
                 raise InterruptedError("Interrupted")
-            layer = int(rec.get("layer", -1))
-            field = rec.get("field") or {}
-            x = float(field.get("x") or 0.0)
-            y = float(field.get("y") or 0.0)
-            bits = resolve_direction_bits(x, y)
-            strength = resolve_strength(rec)
-            intensity = int(rec.get("light_intensity") or cfg.minExposureIntensity)
-            intensity = max(cfg.minExposureIntensity, min(cfg.maxExposureIntensity, intensity))
-            rel_file = str(rec.get("file") or "").strip()
-            if not rel_file:
-                raise RuntimeError(f"layer {layer}: image file path empty")
-            img = (manifest_path.parent / Path(rel_file.replace("/", os.sep))).resolve()
-            if not img.exists():
-                raise FileNotFoundError(f"layer {layer}: image not found: {img}")
+            group = layer_groups[layer_no]
+            log(f"layer {layer_no} ({layer_idx}/{len(ordered_layers)}), records={len(group)}")
 
-            log(f"layer {layer} ({i}/{len(selected)})")
-            if cfg.moveEnabled and not (cfg.skipFirstMove and i == 1):
-                runtime.move_down_mm(layer_thickness)
-            if cfg.magneticEnabled:
-                runtime.apply_magnetic(bits, strength, cfg.magneticHoldSeconds)
-            if cfg.exposureEnabled:
-                runtime.expose(str(img), intensity, cfg.exposureSeconds)
+            # Step 2 / 6: up peel distance before entering this layer process
+            if cfg.moveEnabled and peel_um > 0:
+                runtime.move_um(peel_um, MOVE_DIR_UP, reason="pre-layer lift")
+
+            # Step 3/4 + Step 5 within same layer:
+            # first record: magnet -> down(peel-layer_th) -> expose
+            # additional same-layer records: up(peel) -> magnet -> down(peel) -> expose
+            for rec_idx, rec in enumerate(group):
+                if stop_event.is_set():
+                    raise InterruptedError("Interrupted")
+                field = rec.get("field") or {}
+                x = float(field.get("x") or 0.0)
+                y = float(field.get("y") or 0.0)
+                bits = resolve_direction_bits(x, y)
+                strength = resolve_strength(rec)
+                intensity = int(rec.get("light_intensity") or cfg.minExposureIntensity)
+                intensity = max(cfg.minExposureIntensity, min(cfg.maxExposureIntensity, intensity))
+                rel_file = str(rec.get("file") or "").strip()
+                if not rel_file:
+                    raise RuntimeError(f"layer {layer_no}: image file path empty")
+                img = (manifest_path.parent / Path(rel_file.replace("/", os.sep))).resolve()
+                if not img.exists():
+                    raise FileNotFoundError(f"layer {layer_no}: image not found: {img}")
+
+                if rec_idx > 0 and cfg.moveEnabled and peel_um > 0:
+                    runtime.move_um(peel_um, MOVE_DIR_UP, reason=f"same-layer({layer_no}) re-lift #{rec_idx}")
+
+                if cfg.magneticEnabled:
+                    runtime.apply_magnetic(bits, strength, cfg.magneticHoldSeconds)
+
+                if cfg.moveEnabled:
+                    if rec_idx == 0:
+                        down_um = max(0, peel_um - layer_thickness_um)
+                    else:
+                        down_um = peel_um
+                    if down_um > 0:
+                        runtime.move_um(down_um, MOVE_DIR_DOWN, reason=f"press for layer {layer_no} rec#{rec_idx}")
+
+                if cfg.exposureEnabled:
+                    runtime.expose(str(img), intensity, cfg.exposureSeconds)
+
             if cfg.interLayerDelaySeconds > 0:
                 sleep_interruptible(stop_event, cfg.interLayerDelaySeconds)
+
+        if cfg.moveEnabled and cfg.finalReturnToTop and runtime.z_um > 0:
+            runtime.move_um(runtime.z_um, MOVE_DIR_UP, reason="return to top")
 
         log("print completed")
         return 0

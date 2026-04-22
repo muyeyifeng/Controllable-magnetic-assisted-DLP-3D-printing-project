@@ -7,6 +7,7 @@ import errno
 import fcntl
 import json
 import os
+import subprocess
 import shutil
 import signal
 import tempfile
@@ -116,8 +117,13 @@ class ExposureConfig:
     baudRate: int = 115200
     readTimeoutMs: int = 1000
     responseReadBytes: int = 10
+    imageLoader: str = "fbi"
     framebufferDevice: str = "/dev/fb0"
     framebufferSettleMs: int = 250
+    fbiTty: int = 1
+    fbiAutoScale: bool = True
+    fbiStopGetty: bool = True
+    fbiExtraArgs: list[str] = field(default_factory=list)
     dlpOnSettleMs: int = 500
     sendFanOnCommand: bool = True
     ignoreFanReject: bool = True
@@ -380,6 +386,107 @@ class FramebufferNative:
         raise RuntimeError(f"unsupported framebuffer bpp: {self.bpp}")
 
 
+class FBIRenderer:
+    def __init__(self, cfg: ExposureConfig, stop_event: threading.Event):
+        self.cfg = cfg
+        self.stop_event = stop_event
+        self.proc: Optional[subprocess.Popen[str]] = None
+        self.getty_service = f"getty@tty{int(self.cfg.fbiTty)}.service"
+        self.getty_stopped = False
+        self.temp_white_image: Optional[Path] = None
+
+    def prepare(self) -> None:
+        if shutil.which("fbi") is None:
+            raise RuntimeError("fbi command not found. Install with: sudo apt install -y fbi")
+        if self.cfg.fbiStopGetty:
+            self._suppress_getty()
+
+    def close(self) -> None:
+        self._stop_fbi()
+        if self.getty_stopped:
+            self._run_systemctl("start", self.getty_service, quiet=False)
+            self.getty_stopped = False
+        if self.temp_white_image and self.temp_white_image.exists():
+            try:
+                self.temp_white_image.unlink()
+            except Exception:
+                pass
+            self.temp_white_image = None
+
+    def render_image(self, path: str) -> None:
+        self.prepare()
+        self._start_fbi(Path(path))
+
+    def render_solid(self, rgb: tuple[int, int, int]) -> None:
+        self.prepare()
+        if self.temp_white_image is None:
+            fd, pstr = tempfile.mkstemp(prefix="dlp_fill_", suffix=".png")
+            os.close(fd)
+            p = Path(pstr)
+            # keep default 1080p for projector testing path
+            Image.new("RGB", (1920, 1080), rgb).save(p)
+            self.temp_white_image = p
+        self._start_fbi(self.temp_white_image)
+
+    def _start_fbi(self, image_path: Path) -> None:
+        if not image_path.exists():
+            raise FileNotFoundError(f"fbi image not found: {image_path}")
+        self._stop_fbi()
+        cmd = [
+            "fbi",
+            "-T",
+            str(int(self.cfg.fbiTty)),
+            "-d",
+            self.cfg.framebufferDevice,
+            "--noverbose",
+        ]
+        if self.cfg.fbiAutoScale:
+            cmd.append("-a")
+        cmd.extend(self.cfg.fbiExtraArgs)
+        cmd.append(str(image_path))
+        log(f"display via fbi: {' '.join(cmd)}")
+        self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
+        settle_s = max(0.0, self.cfg.framebufferSettleMs / 1000.0)
+        if settle_s > 0:
+            sleep_interruptible(self.stop_event, settle_s)
+        if self.proc.poll() is not None and self.proc.returncode not in (0, None):
+            raise RuntimeError(f"fbi exited unexpectedly: rc={self.proc.returncode}")
+
+    def _stop_fbi(self) -> None:
+        if self.proc is None:
+            return
+        if self.proc.poll() is None:
+            try:
+                self.proc.terminate()
+                self.proc.wait(timeout=2)
+            except Exception:
+                try:
+                    self.proc.kill()
+                except Exception:
+                    pass
+        self.proc = None
+
+    def _run_systemctl(self, *args: str, quiet: bool = True) -> subprocess.CompletedProcess[str]:
+        p = subprocess.run(
+            ["systemctl", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        if not quiet and p.returncode != 0:
+            log(f"systemctl {' '.join(args)} failed: {p.stderr.strip()}")
+        return p
+
+    def _suppress_getty(self) -> None:
+        active = self._run_systemctl("is-active", self.getty_service).returncode == 0
+        if not active:
+            return
+        p = self._run_systemctl("stop", self.getty_service, quiet=False)
+        if p.returncode == 0:
+            self.getty_stopped = True
+            log(f"tty quiet mode enabled: stopped {self.getty_service}")
+
+
 class PrinterRuntime:
     def __init__(self, cfg: PrintConfig, stop_event: threading.Event):
         self.cfg = cfg
@@ -430,7 +537,14 @@ class PrinterRuntime:
             self.cfg.exposure.baudRate,
             self.cfg.exposure.readTimeoutMs,
         )
-        self.fb = FramebufferNative(self.cfg.exposure.framebufferDevice)
+        loader = (self.cfg.exposure.imageLoader or "fbi").strip().lower()
+        if loader == "fbi":
+            self.fb = FBIRenderer(self.cfg.exposure, self.stop_event)
+            self.fb.prepare()
+        elif loader == "framebuffer":
+            self.fb = FramebufferNative(self.cfg.exposure.framebufferDevice)
+        else:
+            raise RuntimeError(f"unsupported imageLoader: {self.cfg.exposure.imageLoader}")
         self._ensure_dlp_ready("prepare")
 
     def move_um(self, distance_um: int, direction: str, reason: str = "") -> None:
@@ -566,7 +680,6 @@ class PrinterRuntime:
             self._ensure_dlp_ready("per_exposure")
         log(f"exposure start: intensity={intensity} sec={seconds:.3f} image={image_path}")
         self.fb.render_image(image_path)
-        sleep_interruptible(self.stop_event, self.cfg.exposure.framebufferSettleMs / 1000.0)
         self._set_brightness(intensity)
         self._send_dlp(DLP_CMD_LED_ON, "led_on")
         try:
@@ -603,7 +716,6 @@ class PrinterRuntime:
                 self.fb.render_image(image_path)
             else:
                 self.fb.render_solid((255, 255, 255))
-            sleep_interruptible(self.stop_event, self.cfg.exposure.framebufferSettleMs / 1000.0)
             log(f"dlp-test exposure {idx + 1}/{rep}: intensity={intensity}, seconds={seconds:.3f}")
             self._set_brightness(intensity)
             self._send_dlp(DLP_CMD_LED_ON, "led_on")

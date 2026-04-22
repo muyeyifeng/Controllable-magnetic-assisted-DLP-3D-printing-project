@@ -21,7 +21,7 @@
       "stepPin": 13,
       "dirPin": 5,
       "enablePin": 8,
-      "enableLow": true,
+      "enableLow": false,
       "frequencyHz": 800,
       "moveFrequencyHz": 800,
       "homeFrequencyHz": 1600,
@@ -41,7 +41,10 @@
       "readTimeoutMs": 1000,
       "responseReadBytes": 10,
       "framebufferDevice": "/dev/fb0",
-      "framebufferSettleMs": 250
+      "framebufferSettleMs": 250,
+      "skipBrightnessCommand": true,
+      "minimumIntensity": 10,
+      "ignoreLedOffReject": true
     }
   }
 }

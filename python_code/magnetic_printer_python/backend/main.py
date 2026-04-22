@@ -183,6 +183,9 @@ class ExposureNativeConfig:
     responseReadBytes: int = 10
     framebufferDevice: str = "/dev/fb0"
     framebufferSettleMs: int = 250
+    skipBrightnessCommand: bool = True
+    minimumIntensity: int = 10
+    ignoreLedOffReject: bool = True
 
 
 @dataclass
@@ -911,7 +914,11 @@ class NativeHardwareBackend:
             if layer.exposureS > 0:
                 sleep_ctx(ctx, layer.exposureS)
         finally:
-            self._send_dlp_command(DLP_CMD_LED_OFF, "led_off")
+            self._send_dlp_command(
+                DLP_CMD_LED_OFF,
+                "led_off",
+                allow_reject=bool(self.cfg.exposure.ignoreLedOffReject),
+            )
 
     def finish(self, ctx: RunContext) -> None:
         if not self.prepared:
@@ -1107,10 +1114,15 @@ class NativeHardwareBackend:
         self.i2c.write(self.cfg.magnet.mcp4725Address, bytes([0x40, high, low]))
 
     def _set_brightness(self, value: int) -> None:
+        if self.cfg.exposure.skipBrightnessCommand:
+            return
         v = min(max(int(value), 0), 255)
+        floor = int(self.cfg.exposure.minimumIntensity or 0)
+        if v > 0 and v < floor:
+            v = floor
         self._send_dlp_command(bytes([0xA6, 0x02, 0x10, v]), f"brightness_{v}")
 
-    def _send_dlp_command(self, cmd: bytes, desc: str) -> None:
+    def _send_dlp_command(self, cmd: bytes, desc: str, allow_reject: bool = False) -> None:
         if not self.serial:
             raise RuntimeError("serial not prepared")
         resp_len = self.cfg.exposure.responseReadBytes if self.cfg.exposure.responseReadBytes > 0 else 10
@@ -1118,6 +1130,9 @@ class NativeHardwareBackend:
         if len(resp) == 0:
             raise RuntimeError(f"{desc} timeout")
         if resp[-1] == 0xE0:
+            if allow_reject:
+                self.logger.warning("%s rejected by dlp but ignored, response=%s", desc, resp.hex(" "))
+                return
             raise RuntimeError(f"{desc} rejected by dlp, response={resp.hex(' ')}")
 
 

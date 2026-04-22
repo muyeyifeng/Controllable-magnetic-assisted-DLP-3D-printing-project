@@ -192,9 +192,94 @@ func (d *motionDriverPigpio) writePin(pin, level int) error {
 }
 
 func pigpioError(op string, rc C.int) error {
-	msg := C.GoString(C.gpioError(rc))
+	msg := pigpioErrorText(int(rc))
 	if msg == "" {
 		return fmt.Errorf("%s failed: rc=%d", op, int(rc))
 	}
 	return fmt.Errorf("%s failed: rc=%d (%s)", op, int(rc), msg)
+}
+
+func pigpioErrorText(code int) string {
+	switch code {
+	case -1:
+		return "PI_INIT_FAILED"
+	case -2:
+		return "PI_BAD_USER_GPIO"
+	case -3:
+		return "PI_BAD_GPIO"
+	case -4:
+		return "PI_BAD_MODE"
+	case -5:
+		return "PI_BAD_LEVEL"
+	case -6:
+		return "PI_BAD_PUD"
+	case -7:
+		return "PI_BAD_PULSEWIDTH"
+	case -8:
+		return "PI_BAD_DUTYCYCLE"
+	case -67:
+		return "PI_BAD_WAVE_ID"
+	case -68:
+		return "PI_TOO_MANY_CBS"
+	case -69:
+		return "PI_TOO_MANY_OOL"
+	case -70:
+		return "PI_EMPTY_WAVEFORM"
+	case -73:
+		return "PI_BAD_CHAIN_LOOP"
+	case -74:
+		return "PI_CHAIN_COUNTER"
+	case -75:
+		return "PI_BAD_CHAIN_CMD"
+	case -76:
+		return "PI_BAD_CHAIN_DELAY"
+	case -77:
+		return "PI_CHAIN_NESTING"
+	case -78:
+		return "PI_CHAIN_TOO_BIG"
+	case -79:
+		return "PI_DEPRECATED"
+	case -80:
+		return "PI_BAD_SER_OFFSET"
+	case -81:
+		return "PI_GPIO_IN_USE"
+	case -82:
+		return "PI_BAD_SERIAL_COUNT"
+	case -83:
+		return "PI_BAD_PARAM_NUM"
+	case -84:
+		return "PI_DUP_TAG"
+	case -85:
+		return "PI_TOO_MANY_TAGS"
+	case -86:
+		return "PI_BAD_SCRIPT_ID"
+	case -87:
+		return "PI_BAD_SER_DEVICE"
+	case -88:
+		return "PI_BAD_SER_SPEED"
+	case -89:
+		return "PI_BAD_PARAM"
+	case -90:
+		return "PI_NOT_HALTED"
+	case -91:
+		return "PI_SCRIPT_NOT_READY"
+	case -92:
+		return "PI_BAD_TAG"
+	case -93:
+		return "PI_BAD_MICS_DELAY"
+	case -94:
+		return "PI_BAD_MILS_DELAY"
+	case -95:
+		return "PI_BAD_WAVE_ID"
+	case -96:
+		return "PI_TOO_MANY_CBS"
+	case -97:
+		return "PI_TOO_MANY_OOL"
+	case -98:
+		return "PI_EMPTY_WAVEFORM"
+	case -99:
+		return "PI_NO_WAVEFORM_ID"
+	default:
+		return ""
+	}
 }

@@ -1,0 +1,46 @@
+{
+  "listenAddr": ":5241",
+  "dataRoot": "runtime_data",
+  "frontendRoot": "../frontend",
+  "adminUsers": ["admin"],
+  "hardware": {
+    "useMockHardware": false,
+    "skipWaitInMock": false,
+    "commandTimeoutSeconds": 120,
+    "magnet": {
+      "enableGpioPin": 27,
+      "i2cBus": 1,
+      "tcaAddress": 112,
+      "tcaChannel": 0,
+      "pca9554Address": 39,
+      "mcp4725Address": 96,
+      "dacVRef": 5.0
+    },
+    "motion": {
+      "stepPin": 13,
+      "dirPin": 5,
+      "enablePin": 8,
+      "enableLow": true,
+      "frequencyHz": 800,
+      "moveFrequencyHz": 800,
+      "homeFrequencyHz": 1600,
+      "pulseWidthUs": 20,
+      "stepsPerRev": 3200,
+      "leadMm": 4.0,
+      "homeTopPin": 20,
+      "homeStopLevel": 0,
+      "homeDirection": "up",
+      "homeMaxSteps": 0,
+      "homeChunkSteps": 200,
+      "homeReportEvery": 1000
+    },
+    "exposure": {
+      "serialPort": "/dev/ttyUSB0",
+      "baudRate": 115200,
+      "readTimeoutMs": 1000,
+      "responseReadBytes": 10,
+      "framebufferDevice": "/dev/fb0",
+      "framebufferSettleMs": 250
+    }
+  }
+}

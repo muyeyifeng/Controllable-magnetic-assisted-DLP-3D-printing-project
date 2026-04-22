@@ -1,0 +1,5 @@
+.venv/
+backend/runtime_data/
+backend/__pycache__/
+*.pyc
+*.pyo

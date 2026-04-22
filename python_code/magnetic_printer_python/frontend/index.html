@@ -1,0 +1,35 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>登录 | 磁辅 DLP 打印系统</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="container auth-container">
+    <section class="card auth-card">
+      <h1>磁辅 DLP 打印系统</h1>
+      <p class="hint">请先登录。未登录状态下无法查看设备状态和打印控制页面。</p>
+
+      <h2>注册</h2>
+      <div class="row">
+        <input id="register-username" placeholder="用户名(3-32字符)">
+        <input id="register-password" type="password" placeholder="密码(至少6位)">
+        <button id="register-btn" type="button">注册</button>
+      </div>
+
+      <h2>登录</h2>
+      <div class="row">
+        <input id="login-username" placeholder="用户名">
+        <input id="login-password" type="password" placeholder="密码">
+        <button id="login-btn" type="button">登录</button>
+      </div>
+
+      <p id="auth-info">未登录</p>
+      <pre id="messages"></pre>
+    </section>
+  </main>
+  <script src="./auth.js"></script>
+</body>
+</html>

@@ -300,7 +300,7 @@ class FramebufferNative:
         scale = min(self.width / src.width, self.height / src.height)
         tw = max(1, int(round(src.width * scale)))
         th = max(1, int(round(src.height * scale)))
-        resized = src.resize((tw, th), Image.NEAREST)
+        resized = src.resize((tw, th), Image.BILINEAR)
         canvas = Image.new("RGB", (self.width, self.height), "black")
         ox = (self.width - tw) // 2
         oy = (self.height - th) // 2
@@ -316,6 +316,37 @@ class FramebufferNative:
         self.file.write(raw)
 
     def _to_framebuffer_bytes(self, img: Image.Image) -> bytes:
+        if self.bpp == 16:
+            try:
+                packed = img.tobytes("raw", "BGR;16")
+                return self._with_stride(packed, self.width * 2)
+            except Exception:
+                return self._to_framebuffer_bytes_slow(img)
+        if self.bpp == 24:
+            try:
+                packed = img.tobytes("raw", "BGR")
+                return self._with_stride(packed, self.width * 3)
+            except Exception:
+                return self._to_framebuffer_bytes_slow(img)
+        if self.bpp == 32:
+            try:
+                packed = img.tobytes("raw", "BGRX")
+                return self._with_stride(packed, self.width * 4)
+            except Exception:
+                return self._to_framebuffer_bytes_slow(img)
+        raise RuntimeError(f"unsupported framebuffer bpp: {self.bpp}")
+
+    def _with_stride(self, packed: bytes, row_bytes: int) -> bytes:
+        if self.stride == row_bytes:
+            return packed
+        out = bytearray(self.stride * self.height)
+        for y in range(self.height):
+            src_off = y * row_bytes
+            dst_off = y * self.stride
+            out[dst_off : dst_off + row_bytes] = packed[src_off : src_off + row_bytes]
+        return bytes(out)
+
+    def _to_framebuffer_bytes_slow(self, img: Image.Image) -> bytes:
         px = img.load()
         out = bytearray(self.stride * self.height)
         if self.bpp == 16:

@@ -21,7 +21,7 @@
     "dirPin": 5,
     "dirHighIsUp": true,
     "enablePin": 8,
-    "enableLow": false,
+    "enableLow": true,
     "moveFrequencyHz": 1600,
     "homeFrequencyHz": 1600,
     "pulseWidthUs": 20,
@@ -30,7 +30,8 @@
     "homeTopPin": 20,
     "homeStopLevel": 0,
     "homeChunkSteps": 200,
-    "homeMaxSteps": 300000
+    "homeMaxSteps": 300000,
+    "homeLogEverySteps": 5000
   },
   "magnet": {
     "enableGpioPin": 27,

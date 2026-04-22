@@ -109,6 +109,7 @@ class MotionConfig:
     homeStopLevel: int = 0
     homeChunkSteps: int = 200
     homeMaxSteps: int = 300000
+    homeLogEverySteps: int = 5000
 
 
 @dataclass
@@ -623,6 +624,11 @@ class PrinterRuntime:
         self.dir_pin.write(dir_level)
         self._set_motion_enable(True)
         total = 0
+        log_every = max(100, int(self.cfg.motion.homeLogEverySteps))
+        log(
+            f"home start: moving up to top limit @ {freq}Hz "
+            f"(max_steps={max_steps}, chunk={chunk}, stop_level={stop})"
+        )
         try:
             while total < max_steps:
                 if self.stop_event.is_set():
@@ -640,6 +646,8 @@ class PrinterRuntime:
                     self.step_pin.write(0)
                     time.sleep(low)
                     total += 1
+                    if total % log_every == 0:
+                        log(f"home progress: steps={total}/{max_steps}")
                     if self.home_pin.read() == stop:
                         log(f"home reached top limit, steps={total}")
                         self.z_um = 0
@@ -1055,6 +1063,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--magnet-hold", type=float, default=1.0, help="Magnetic hold seconds for test")
     p.add_argument("--magnet-repeat", type=int, default=1, help="Magnetic test repeat count")
     p.add_argument("--magnet-interval", type=float, default=0.5, help="Magnetic test interval seconds")
+    p.add_argument("--tmp-dir", default="", help="Directory for extraction/runtime temp files (avoid /tmp tmpfs)")
     p.add_argument("--keep-extracted", action="store_true", help="Keep extracted temp files")
     p.add_argument("--mock", action="store_true", help="Force mock hardware mode")
     return p.parse_args()
@@ -1084,7 +1093,12 @@ def main() -> int:
         cfg.useMockHardware = True
 
     stop_event = threading.Event()
-    tmp_dir = Path(tempfile.mkdtemp(prefix="slice_job_"))
+    if args.tmp_dir:
+        tmp_base = Path(args.tmp_dir).expanduser().resolve()
+        tmp_base.mkdir(parents=True, exist_ok=True)
+        tmp_dir = Path(tempfile.mkdtemp(prefix="slice_job_", dir=str(tmp_base)))
+    else:
+        tmp_dir = Path(tempfile.mkdtemp(prefix="slice_job_"))
     runtime = PrinterRuntime(cfg, stop_event)
     signal_count = {"n": 0}
 

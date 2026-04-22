@@ -1107,6 +1107,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--zip", default="", help="Path to slice zip, e.g. slice_example.zip")
     p.add_argument("--config", default="cli_config.json", help="Path to config json")
     p.add_argument("--start-layer", type=int, default=0, help="Start layer index (0-based)")
+    p.add_argument("--start-record", type=int, default=0, help="Start record index inside start-layer (0-based)")
     p.add_argument("--end-layer", type=int, default=-1, help="End layer index inclusive (-1 means all)")
     p.add_argument("--skip-positioning", action="store_true", help="Skip pre-home and bottom move (for resume)")
     p.add_argument("--dlp-test", action="store_true", help="Run DLP-only exposure test and exit")
@@ -1141,6 +1142,8 @@ def main() -> int:
         log("warning: non-linux platform, script will run in mock mode")
 
     args = parse_args()
+    if args.start_record < 0:
+        raise ValueError("--start-record must be >= 0")
     zip_path = Path(args.zip).resolve() if args.zip else None
     config_path = Path(args.config).resolve()
 
@@ -1260,7 +1263,18 @@ def main() -> int:
             # Step 3/4 + Step 5 within same layer:
             # first record: magnet -> down(peel-layer_th) -> expose
             # additional same-layer records: up(peel) -> magnet -> down(peel) -> expose
+            rec_begin = args.start_record if layer_no == args.start_layer else 0
+            if rec_begin >= len(group):
+                log(
+                    f"layer {layer_no}: start-record={rec_begin} out of range "
+                    f"(records={len(group)}), skip this layer"
+                )
+                continue
+            if rec_begin > 0:
+                log(f"layer {layer_no}: resuming from record {rec_begin}/{len(group)-1}")
             for rec_idx, rec in enumerate(group):
+                if rec_idx < rec_begin:
+                    continue
                 if stop_event.is_set():
                     raise InterruptedError("Interrupted")
                 field = rec.get("field") or {}

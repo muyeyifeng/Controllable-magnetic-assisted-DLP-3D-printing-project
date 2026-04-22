@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import hashlib
 import hmac
 import io
@@ -600,7 +601,28 @@ class SysfsGPIOPin:
         gpio_root = Path("/sys/class/gpio")
         gpio_path = gpio_root / f"gpio{self.export_num}"
         if not gpio_path.exists():
-            (gpio_root / "export").write_text(str(self.export_num), encoding="utf-8")
+            try:
+                (gpio_root / "export").write_text(str(self.export_num), encoding="utf-8")
+            except OSError as exc:
+                # EBUSY: already exported by another process.
+                if exc.errno == errno.EBUSY:
+                    pass
+                # EINVAL on newer Pi kernels is often caused by using BCM number
+                # while sysfs expects global GPIO number. Try auto remap.
+                elif exc.errno == errno.EINVAL:
+                    mapped = resolve_sysfs_gpio_export_number(gpio_root, self.num)
+                    self.export_num = mapped
+                    gpio_path = gpio_root / f"gpio{self.export_num}"
+                    if not gpio_path.exists():
+                        try:
+                            (gpio_root / "export").write_text(str(self.export_num), encoding="utf-8")
+                        except OSError as exc2:
+                            if exc2.errno != errno.EBUSY:
+                                raise RuntimeError(
+                                    f"export gpio{self.export_num} (mapped from bcm{self.num}) failed: {exc2}"
+                                ) from exc2
+                else:
+                    raise
             deadline = time.time() + 2.0
             while not gpio_path.exists():
                 if time.time() > deadline:
@@ -628,6 +650,38 @@ class SysfsGPIOPin:
         if self.value_file:
             self.value_file.close()
             self.value_file = None
+
+
+def resolve_sysfs_gpio_export_number(gpio_root: Path, bcm: int) -> int:
+    chips = sorted(gpio_root.glob("gpiochip*"))
+    if not chips:
+        raise RuntimeError("no gpiochip found in /sys/class/gpio")
+    candidates: list[tuple[int, int]] = []
+    for chip in chips:
+        try:
+            base = int((chip / "base").read_text(encoding="utf-8").strip())
+            ngpio = int((chip / "ngpio").read_text(encoding="utf-8").strip())
+        except Exception:
+            continue
+        if ngpio <= 0:
+            continue
+        if bcm < 0 or bcm >= ngpio:
+            continue
+        label = ""
+        try:
+            label = (chip / "label").read_text(encoding="utf-8").strip().lower()
+        except Exception:
+            pass
+        score = 0
+        if "bcm" in label or "pinctrl" in label:
+            score += 10
+        if "raspberry" in label:
+            score += 5
+        candidates.append((base + bcm, score))
+    if not candidates:
+        raise RuntimeError(f"cannot map bcm gpio {bcm} to global sysfs number")
+    candidates.sort(key=lambda x: x[1], reverse=True)
+    return candidates[0][0]
 
 
 class I2CNative:

@@ -51,10 +51,12 @@
     "sendFanOnCommand": true,
     "ignoreFanReject": true,
     "skipBrightnessCommand": false,
-    "ignoreBrightnessReject": true,
+    "ignoreBrightnessReject": false,
     "minimumIntensity": 10,
     "useSliceIntensity": false,
     "defaultIntensity": 120,
-    "ignoreLedOffReject": true
+    "ignoreLedOffReject": true,
+    "repeatDlpOnBeforeEachExposure": true,
+    "logDlpCommands": true
   }
 }

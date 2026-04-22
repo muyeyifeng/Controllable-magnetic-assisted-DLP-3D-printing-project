@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import errno
 import fcntl
 import json
@@ -121,11 +122,13 @@ class ExposureConfig:
     sendFanOnCommand: bool = True
     ignoreFanReject: bool = True
     skipBrightnessCommand: bool = False
-    ignoreBrightnessReject: bool = True
+    ignoreBrightnessReject: bool = False
     minimumIntensity: int = 10
     useSliceIntensity: bool = False
     defaultIntensity: int = 120
     ignoreLedOffReject: bool = True
+    repeatDlpOnBeforeEachExposure: bool = True
+    logDlpCommands: bool = True
 
 
 @dataclass
@@ -306,6 +309,12 @@ class FramebufferNative:
         self.file.seek(0)
         self.file.write(raw)
 
+    def render_solid(self, rgb: tuple[int, int, int]) -> None:
+        canvas = Image.new("RGB", (self.width, self.height), rgb)
+        raw = self._to_framebuffer_bytes(canvas)
+        self.file.seek(0)
+        self.file.write(raw)
+
     def _to_framebuffer_bytes(self, img: Image.Image) -> bytes:
         px = img.load()
         out = bytearray(self.stride * self.height)
@@ -355,6 +364,8 @@ class PrinterRuntime:
         self.fb = None
         self.mag_active_low = None
         self.z_um = 0
+        self._emergency_lock = threading.Lock()
+        self._emergency_done = False
 
     def prepare_motion(self) -> None:
         if self.mock or self.step_pin is not None:
@@ -389,24 +400,7 @@ class PrinterRuntime:
             self.cfg.exposure.readTimeoutMs,
         )
         self.fb = FramebufferNative(self.cfg.exposure.framebufferDevice)
-        self._send_dlp(DLP_CMD_HANDSHAKE, "handshake")
-        self._send_dlp(DLP_CMD_ON, "dlp_on")
-        settle_s = max(0.0, self.cfg.exposure.dlpOnSettleMs / 1000.0)
-        if settle_s > 0:
-            sleep_interruptible(self.stop_event, settle_s)
-        if self.cfg.exposure.sendFanOnCommand:
-            self._send_dlp(
-                DLP_CMD_FAN_ON,
-                "fan_on",
-                allow_reject=self.cfg.exposure.ignoreFanReject,
-                silent_reject=self.cfg.exposure.ignoreFanReject,
-            )
-        self._send_dlp(
-            DLP_CMD_LED_OFF,
-            "led_off",
-            allow_reject=self.cfg.exposure.ignoreLedOffReject,
-            silent_reject=self.cfg.exposure.ignoreLedOffReject,
-        )
+        self._ensure_dlp_ready("prepare")
 
     def move_um(self, distance_um: int, direction: str, reason: str = "") -> None:
         if distance_um <= 0:
@@ -537,6 +531,9 @@ class PrinterRuntime:
             sleep_interruptible(self.stop_event, seconds)
             return
         self.prepare_exposure()
+        if self.cfg.exposure.repeatDlpOnBeforeEachExposure:
+            self._ensure_dlp_ready("per_exposure")
+        log(f"exposure start: intensity={intensity} sec={seconds:.3f} image={image_path}")
         self.fb.render_image(image_path)
         sleep_interruptible(self.stop_event, self.cfg.exposure.framebufferSettleMs / 1000.0)
         self._set_brightness(intensity)
@@ -550,37 +547,74 @@ class PrinterRuntime:
                 allow_reject=self.cfg.exposure.ignoreLedOffReject,
                 silent_reject=self.cfg.exposure.ignoreLedOffReject,
             )
+            log("exposure done")
+
+    def dlp_self_test(
+        self,
+        image_path: Optional[str],
+        intensity: int,
+        seconds: float,
+        repeat: int,
+        interval_s: float,
+    ) -> None:
+        if self.mock:
+            log(f"[MOCK] dlp-test intensity={intensity} sec={seconds:.3f} repeat={repeat}")
+            return
+        self.prepare_exposure()
+        rep = max(1, int(repeat))
+        gap = max(0.0, float(interval_s))
+        for idx in range(rep):
+            if self.stop_event.is_set():
+                raise InterruptedError("Interrupted")
+            if self.cfg.exposure.repeatDlpOnBeforeEachExposure:
+                self._ensure_dlp_ready(f"dlp_test#{idx + 1}")
+            if image_path:
+                self.fb.render_image(image_path)
+            else:
+                self.fb.render_solid((255, 255, 255))
+            sleep_interruptible(self.stop_event, self.cfg.exposure.framebufferSettleMs / 1000.0)
+            log(f"dlp-test exposure {idx + 1}/{rep}: intensity={intensity}, seconds={seconds:.3f}")
+            self._set_brightness(intensity)
+            self._send_dlp(DLP_CMD_LED_ON, "led_on")
+            try:
+                sleep_interruptible(self.stop_event, seconds)
+            finally:
+                self._send_dlp(
+                    DLP_CMD_LED_OFF,
+                    "led_off",
+                    allow_reject=self.cfg.exposure.ignoreLedOffReject,
+                    silent_reject=self.cfg.exposure.ignoreLedOffReject,
+                )
+            if idx + 1 < rep and gap > 0:
+                sleep_interruptible(self.stop_event, gap)
 
     def emergency_stop(self) -> None:
         log("emergency stop: stopping motion + magnetic + dlp")
-        try:
-            if self.step_pin:
-                self.step_pin.write(0)
-        except Exception:
-            pass
-        try:
-            self._set_motion_enable(False)
-        except Exception:
-            pass
-        try:
-            if self.i2c:
-                self._write_dac(0.0)
-                self._disable_tca()
-        except Exception:
-            pass
-        try:
-            self._set_magnet_gate(False)
-        except Exception:
-            pass
-        try:
-            if self.serial:
-                self._send_dlp(DLP_CMD_LED_OFF, "led_off", allow_reject=True, silent_reject=True)
-                self._send_dlp(DLP_CMD_OFF, "dlp_off", allow_reject=True)
-        except Exception:
-            pass
+        if self.step_pin:
+            self._safe_call("step_pin low", lambda: self.step_pin.write(0))
+        self._safe_call("motion disable", lambda: self._set_motion_enable(False))
+        if self.i2c:
+            self._safe_call("dac zero", lambda: self._write_dac(0.0))
+            self._safe_call("tca disable", self._disable_tca)
+        self._safe_call("magnet gate off", lambda: self._set_magnet_gate(False))
+        if self.serial:
+            self._safe_call(
+                "dlp led_off",
+                lambda: self._send_dlp(DLP_CMD_LED_OFF, "led_off", allow_reject=True, silent_reject=True),
+            )
+            self._safe_call("dlp off", lambda: self._send_dlp(DLP_CMD_OFF, "dlp_off", allow_reject=True))
+
+    def request_emergency_stop(self, reason: str) -> None:
+        self.stop_event.set()
+        with self._emergency_lock:
+            if self._emergency_done:
+                return
+            self._emergency_done = True
+        log(f"safety stop requested: {reason}")
+        self.emergency_stop()
 
     def close(self) -> None:
-        self.emergency_stop()
+        self.request_emergency_stop("runtime.close")
         for pin in [self.step_pin, self.dir_pin, self.en_pin, self.mag_en_pin, self.home_pin]:
             try:
                 if pin:
@@ -668,8 +702,33 @@ class PrinterRuntime:
         low = (code & 0x0F) << 4
         self.i2c.write(self.cfg.magnet.mcp4725Address, bytes([0x40, high, low]))
 
+    def _ensure_dlp_ready(self, stage: str) -> None:
+        log(f"dlp init ({stage})")
+        self._send_dlp(DLP_CMD_HANDSHAKE, "handshake")
+        self._send_dlp(DLP_CMD_ON, "dlp_on")
+        settle_s = max(0.0, self.cfg.exposure.dlpOnSettleMs / 1000.0)
+        if settle_s > 0:
+            sleep_interruptible(self.stop_event, settle_s)
+        if self.cfg.exposure.sendFanOnCommand:
+            self._send_dlp(
+                DLP_CMD_FAN_ON,
+                "fan_on",
+                allow_reject=self.cfg.exposure.ignoreFanReject,
+                silent_reject=self.cfg.exposure.ignoreFanReject,
+            )
+        self._send_dlp(
+            DLP_CMD_LED_OFF,
+            "led_off",
+            allow_reject=self.cfg.exposure.ignoreLedOffReject,
+            silent_reject=self.cfg.exposure.ignoreLedOffReject,
+        )
+
     def _send_dlp(self, cmd: bytes, desc: str, allow_reject: bool = False, silent_reject: bool = False) -> None:
+        if self.cfg.exposure.logDlpCommands:
+            log(f"dlp tx {desc}: {cmd.hex(' ')}")
         resp = self.serial.send(cmd, max(1, self.cfg.exposure.responseReadBytes))
+        if self.cfg.exposure.logDlpCommands:
+            log(f"dlp rx {desc}: {resp.hex(' ') if resp else '<empty>'}")
         if len(resp) == 0:
             raise RuntimeError(f"{desc} timeout")
         if resp[-1] == 0xE0:
@@ -678,6 +737,12 @@ class PrinterRuntime:
                     log(f"{desc} rejected but ignored: {resp.hex(' ')}")
                 return
             raise RuntimeError(f"{desc} rejected by dlp, response={resp.hex(' ')}")
+
+    def _safe_call(self, label: str, fn) -> None:  # noqa: ANN001
+        try:
+            fn()
+        except Exception as exc:
+            log(f"safety step failed ({label}): {exc}")
 
     def _set_brightness(self, intensity: int) -> None:
         if self.cfg.exposure.skipBrightnessCommand:
@@ -753,10 +818,17 @@ def load_config(path: Path) -> PrintConfig:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run magnetic-assisted DLP print directly from sliced zip")
-    p.add_argument("--zip", required=True, help="Path to slice zip, e.g. slice_example.zip")
+    p.add_argument("--zip", default="", help="Path to slice zip, e.g. slice_example.zip")
     p.add_argument("--config", default="cli_config.json", help="Path to config json")
     p.add_argument("--start-layer", type=int, default=0, help="Start layer index (0-based)")
     p.add_argument("--end-layer", type=int, default=-1, help="End layer index inclusive (-1 means all)")
+    p.add_argument("--skip-positioning", action="store_true", help="Skip pre-home and bottom move (for resume)")
+    p.add_argument("--dlp-test", action="store_true", help="Run DLP-only exposure test and exit")
+    p.add_argument("--dlp-image", default="", help="Image path for DLP test (default: full white frame)")
+    p.add_argument("--dlp-intensity", type=int, default=-1, help="DLP test intensity (0-255, -1 uses config)")
+    p.add_argument("--dlp-seconds", type=float, default=2.0, help="DLP test exposure seconds")
+    p.add_argument("--dlp-repeat", type=int, default=1, help="DLP test repeat count")
+    p.add_argument("--dlp-interval", type=float, default=0.5, help="DLP test interval seconds")
     p.add_argument("--keep-extracted", action="store_true", help="Keep extracted temp files")
     p.add_argument("--mock", action="store_true", help="Force mock hardware mode")
     return p.parse_args()
@@ -776,10 +848,8 @@ def main() -> int:
         log("warning: non-linux platform, script will run in mock mode")
 
     args = parse_args()
-    zip_path = Path(args.zip).resolve()
+    zip_path = Path(args.zip).resolve() if args.zip else None
     config_path = Path(args.config).resolve()
-    if not zip_path.exists():
-        raise FileNotFoundError(f"zip not found: {zip_path}")
 
     cfg = load_config(config_path)
     if args.mock:
@@ -788,19 +858,46 @@ def main() -> int:
         cfg.useMockHardware = True
 
     stop_event = threading.Event()
+    tmp_dir = Path(tempfile.mkdtemp(prefix="slice_job_"))
+    runtime = PrinterRuntime(cfg, stop_event)
+    signal_count = {"n": 0}
 
     def on_signal(signum, frame):  # noqa: ANN001
         _ = frame
-        log(f"signal {signum} received, stopping safely...")
-        stop_event.set()
+        signal_count["n"] += 1
+        runtime.request_emergency_stop(f"signal {signum}")
+        if signal_count["n"] >= 2:
+            log("second interrupt received, forcing exit now")
+            os._exit(130)
 
     signal.signal(signal.SIGINT, on_signal)
     signal.signal(signal.SIGTERM, on_signal)
-
-    tmp_dir = Path(tempfile.mkdtemp(prefix="slice_job_"))
-    runtime = PrinterRuntime(cfg, stop_event)
+    atexit.register(lambda: runtime.request_emergency_stop("atexit"))
 
     try:
+        if args.dlp_test:
+            image_path = args.dlp_image.strip()
+            if image_path:
+                image_abs = Path(image_path).resolve()
+                if not image_abs.exists():
+                    raise FileNotFoundError(f"dlp-test image not found: {image_abs}")
+                image_use = str(image_abs)
+            else:
+                image_use = None
+            intensity = int(cfg.exposure.defaultIntensity if args.dlp_intensity < 0 else args.dlp_intensity)
+            intensity = max(cfg.minExposureIntensity, min(cfg.maxExposureIntensity, intensity))
+            runtime.dlp_self_test(
+                image_path=image_use,
+                intensity=intensity,
+                seconds=max(0.01, float(args.dlp_seconds)),
+                repeat=max(1, int(args.dlp_repeat)),
+                interval_s=max(0.0, float(args.dlp_interval)),
+            )
+            log("dlp-test completed")
+            return 0
+
+        if zip_path is None or not zip_path.exists():
+            raise FileNotFoundError(f"zip not found: {zip_path}")
         log(f"extracting zip: {zip_path}")
         extract_zip_safe(zip_path, tmp_dir)
         manifest_path = find_manifest_file(tmp_dir)
@@ -827,11 +924,13 @@ def main() -> int:
             layer_groups.setdefault(layer, []).append(rec)
         ordered_layers = sorted(layer_groups.keys())
 
-        if cfg.moveEnabled and cfg.preHomeEnabled:
-            runtime.home_to_top(max(0, int(cfg.preHomeDropUm)))
-
-        if cfg.moveEnabled and cfg.bottomDistanceUm > 0:
-            runtime.move_um(cfg.bottomDistanceUm, MOVE_DIR_DOWN, reason="to bottom")
+        if args.skip_positioning:
+            log("skip-positioning enabled: pre-home and bottom move skipped")
+        else:
+            if cfg.moveEnabled and cfg.preHomeEnabled:
+                runtime.home_to_top(max(0, int(cfg.preHomeDropUm)))
+            if cfg.moveEnabled and cfg.bottomDistanceUm > 0:
+                runtime.move_um(cfg.bottomDistanceUm, MOVE_DIR_DOWN, reason="to bottom")
 
         peel_um = max(0, int(cfg.peelDistanceUm))
         for layer_idx, layer_no in enumerate(ordered_layers, start=1):
@@ -894,6 +993,10 @@ def main() -> int:
         return 0
     except InterruptedError:
         log("print interrupted by user")
+        return 130
+    except KeyboardInterrupt:
+        runtime.request_emergency_stop("KeyboardInterrupt")
+        log("print interrupted by keyboard")
         return 130
     finally:
         runtime.close()

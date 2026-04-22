@@ -146,6 +146,7 @@ def verify_password(password: str, salt_hex: str, hash_hex: str) -> bool:
 @dataclass
 class MagnetNativeConfig:
     enableGpioPin: int = 27
+    enableActiveLow: Optional[bool] = None
     i2cBus: int = 1
     tcaAddress: int = 0x70
     tcaChannel: int = 0
@@ -546,7 +547,8 @@ def build_layer_plan(manifest: dict[str, Any], pkg: StoredPackage, overrides: di
         if overrides.get("exposureIntensity") is not None:
             intensity = int(overrides["exposureIntensity"])
         rel_file = str(rec.get("file") or "").strip()
-        image_path = (Path(pkg.extractedDirectory) / Path(rel_file.replace("/", os.sep))).resolve()
+        manifest_dir = Path(pkg.manifestPath).resolve().parent
+        image_path = (manifest_dir / Path(rel_file.replace("/", os.sep))).resolve()
         plan.append(
             LayerPlanItem(
                 layerIndex=int(rec.get("layer", 0)) + 1,
@@ -811,41 +813,18 @@ class NativeHardwareBackend:
         self.home_top_pin: SysfsGPIOPin | None = None
         self.serial: SerialNative | None = None
         self.fb: FramebufferNative | None = None
+        self.magnet_prepared = False
+        self.motion_prepared = False
+        self.exposure_prepared = False
+        self._magnet_active_low_resolved: Optional[bool] = None
 
     def prepare(self, ctx: RunContext) -> None:
-        if self.prepared:
-            return
         if os.name == "nt":
             raise RuntimeError("native hardware backend is linux only")
-        self.enable_pin = SysfsGPIOPin(self.cfg.magnet.enableGpioPin)
-        self.enable_pin.prepare("out")
-        self.enable_pin.write(1)
-        self.i2c = I2CNative(self.cfg.magnet.i2cBus)
-
-        self.step_pin = SysfsGPIOPin(self.cfg.motion.stepPin)
-        self.dir_pin = SysfsGPIOPin(self.cfg.motion.dirPin)
-        self.move_enable_pin = SysfsGPIOPin(self.cfg.motion.enablePin)
-        self.step_pin.prepare("out")
-        self.dir_pin.prepare("out")
-        self.move_enable_pin.prepare("out")
-        self._set_motion_enable(False)
-        self.step_pin.write(0)
-        if self.cfg.motion.homeTopPin > 0:
-            self.home_top_pin = SysfsGPIOPin(self.cfg.motion.homeTopPin)
-            self.home_top_pin.prepare("in")
-
-        self.serial = SerialNative(
-            self.cfg.exposure.serialPort,
-            self.cfg.exposure.baudRate,
-            self.cfg.exposure.readTimeoutMs,
-        )
-        self.fb = FramebufferNative(self.cfg.exposure.framebufferDevice)
-        self._send_dlp_command(DLP_CMD_HANDSHAKE, "handshake")
-        self._send_dlp_command(DLP_CMD_ON, "dlp_on")
-        self._send_dlp_command(DLP_CMD_LED_OFF, "led_off")
         self.prepared = True
 
     def move_layer(self, ctx: RunContext, layer: LayerPlanItem) -> None:
+        self._ensure_motion_prepared()
         move_direction = normalize_move_direction(layer.moveDirection)
         steps = self._steps_from_mm(layer.layerThicknessMm)
         if steps <= 0:
@@ -860,6 +839,7 @@ class NativeHardwareBackend:
             self._set_motion_enable(False)
 
     def home(self, ctx: RunContext) -> None:
+        self._ensure_motion_prepared()
         if self.home_top_pin is None:
             raise RuntimeError("homeTopPin is not configured")
         stop = self.cfg.motion.homeStopLevel
@@ -892,12 +872,13 @@ class NativeHardwareBackend:
             self._set_motion_enable(False)
 
     def apply_magnetic_field(self, ctx: RunContext, layer: LayerPlanItem) -> None:
+        self._ensure_magnet_prepared()
         if not self.i2c or not self.enable_pin:
             raise RuntimeError("magnet module not prepared")
         bits = normalize_direction_bits(layer.directionBits)
         validate_direction_bits(bits)
         out = bits_to_output_byte(bits)
-        self.enable_pin.write(0)
+        self.enable_pin.write(self._magnet_gate_on_level())
         try:
             self._select_tca()
             self._write_pca9554(out)
@@ -913,9 +894,10 @@ class NativeHardwareBackend:
                 self._disable_tca()
             except Exception:
                 pass
-            self.enable_pin.write(1)
+            self.enable_pin.write(self._magnet_gate_off_level())
 
     def expose_layer(self, ctx: RunContext, layer: LayerPlanItem) -> None:
+        self._ensure_exposure_prepared()
         if not self.serial or not self.fb:
             raise RuntimeError("exposure module not prepared")
         if not (layer.imagePath or "").strip():
@@ -934,11 +916,15 @@ class NativeHardwareBackend:
     def finish(self, ctx: RunContext) -> None:
         if not self.prepared:
             return
-        try:
-            self._send_dlp_command(DLP_CMD_LED_OFF, "led_off")
-            self._send_dlp_command(DLP_CMD_OFF, "dlp_off")
-        except Exception:
-            pass
+        if self.exposure_prepared:
+            try:
+                self._send_dlp_command(DLP_CMD_LED_OFF, "led_off")
+            except Exception:
+                pass
+            try:
+                self._send_dlp_command(DLP_CMD_OFF, "dlp_off")
+            except Exception:
+                pass
         for pin in [self.step_pin, self.dir_pin, self.move_enable_pin, self.home_top_pin, self.enable_pin]:
             if pin:
                 try:
@@ -960,7 +946,90 @@ class NativeHardwareBackend:
                 self.i2c.close()
             except Exception:
                 pass
+        self.magnet_prepared = False
+        self.motion_prepared = False
+        self.exposure_prepared = False
         self.prepared = False
+
+    def _ensure_magnet_prepared(self) -> None:
+        if self.magnet_prepared:
+            return
+        self.enable_pin = SysfsGPIOPin(self.cfg.magnet.enableGpioPin)
+        self.enable_pin.prepare("out")
+        self.i2c = I2CNative(self.cfg.magnet.i2cBus)
+        self._magnet_active_low_resolved = self._resolve_magnet_active_low()
+        self.enable_pin.write(self._magnet_gate_off_level())
+        self.magnet_prepared = True
+
+    def _magnet_gate_on_level(self) -> int:
+        active_low = self._magnet_active_low_resolved
+        if active_low is None:
+            active_low = True
+        return 0 if active_low else 1
+
+    def _magnet_gate_off_level(self) -> int:
+        return 1 - self._magnet_gate_on_level()
+
+    def _resolve_magnet_active_low(self) -> bool:
+        if self.cfg.magnet.enableActiveLow is not None:
+            return bool(self.cfg.magnet.enableActiveLow)
+        if not self.enable_pin or not self.i2c:
+            return True
+        # Auto-detect gate polarity by probing PCA9554 read on selected TCA channel.
+        for active_low in (True, False):
+            on_level = 0 if active_low else 1
+            off_level = 1 - on_level
+            try:
+                self.enable_pin.write(on_level)
+                self._select_tca()
+                _ = self.i2c.read_reg(self.cfg.magnet.pca9554Address, 0x01)
+                self.logger.info("magnet enable polarity auto-detected: activeLow=%s", active_low)
+                return active_low
+            except Exception:
+                pass
+            finally:
+                try:
+                    self._disable_tca()
+                except Exception:
+                    pass
+                try:
+                    self.enable_pin.write(off_level)
+                except Exception:
+                    pass
+        raise RuntimeError(
+            "failed to auto-detect magnet enable polarity; cannot read PCA9554. "
+            "Please verify wiring/address/channel, or set hardware.magnet.enableActiveLow explicitly."
+        )
+
+    def _ensure_motion_prepared(self) -> None:
+        if self.motion_prepared:
+            return
+        self.step_pin = SysfsGPIOPin(self.cfg.motion.stepPin)
+        self.dir_pin = SysfsGPIOPin(self.cfg.motion.dirPin)
+        self.move_enable_pin = SysfsGPIOPin(self.cfg.motion.enablePin)
+        self.step_pin.prepare("out")
+        self.dir_pin.prepare("out")
+        self.move_enable_pin.prepare("out")
+        self._set_motion_enable(False)
+        self.step_pin.write(0)
+        if self.cfg.motion.homeTopPin > 0:
+            self.home_top_pin = SysfsGPIOPin(self.cfg.motion.homeTopPin)
+            self.home_top_pin.prepare("in")
+        self.motion_prepared = True
+
+    def _ensure_exposure_prepared(self) -> None:
+        if self.exposure_prepared:
+            return
+        self.serial = SerialNative(
+            self.cfg.exposure.serialPort,
+            self.cfg.exposure.baudRate,
+            self.cfg.exposure.readTimeoutMs,
+        )
+        self.fb = FramebufferNative(self.cfg.exposure.framebufferDevice)
+        self._send_dlp_command(DLP_CMD_HANDSHAKE, "handshake")
+        self._send_dlp_command(DLP_CMD_ON, "dlp_on")
+        self._send_dlp_command(DLP_CMD_LED_OFF, "led_off")
+        self.exposure_prepared = True
 
     def _set_motion_enable(self, enable: bool) -> None:
         if not self.move_enable_pin:
@@ -1435,7 +1504,8 @@ class FlowRunContext:
         file_rel = (rec.get("file") or "").strip()
         if not file_rel:
             raise RuntimeError("slice record image file is empty")
-        image_path = (Path(cursor.pkg.extractedDirectory) / Path(file_rel.replace("/", os.sep))).resolve()
+        manifest_dir = Path(cursor.pkg.manifestPath).resolve().parent
+        image_path = (manifest_dir / Path(file_rel.replace("/", os.sep))).resolve()
         return rec, str(image_path)
 
 

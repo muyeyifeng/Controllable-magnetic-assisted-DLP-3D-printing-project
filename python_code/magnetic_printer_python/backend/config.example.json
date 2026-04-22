@@ -9,6 +9,7 @@
     "commandTimeoutSeconds": 120,
     "magnet": {
       "enableGpioPin": 27,
+      "enableActiveLow": null,
       "i2cBus": 1,
       "tcaAddress": 112,
       "tcaChannel": 0,
